@@ -3,7 +3,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -35,10 +35,33 @@ class Settings(BaseSettings):
         env_prefix="",
         extra="ignore",
         str_strip_whitespace=True,
+        validate_default=True,
     )
+
+
+def env_files_for(app_env: str | AppEnv) -> tuple[Path, ...]:
+    try:
+        return (BASE_DIR / f".env.{AppEnv(app_env).value}",)
+    except ValueError as exc:
+        allowed = ", ".join(env.value for env in AppEnv)
+        raise RuntimeError(
+            f"Неверный APP_ENV: {app_env!r}. Можно только такие значения: {allowed}."
+        ) from exc
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    parts = [
+        f"{(err.get('loc') or ['UNKNOWN'])[0].upper()}: {err.get('msg', 'Неверное значение')}"
+        for err in exc.errors()
+    ]
+    return "Неверные настройки приложения. " + "; ".join(parts)
 
 
 @lru_cache
 def get_settings() -> Settings:
-    app_env = os.getenv("APP_ENV", AppEnv.DEV)
-    return Settings(_env_file=BASE_DIR / f".env.{app_env}")
+    try:
+        return Settings(
+            _env_file=env_files_for(os.getenv("APP_ENV", AppEnv.DEV.value))
+        )
+    except ValidationError as exc:
+        raise RuntimeError(_format_validation_error(exc)) from exc
