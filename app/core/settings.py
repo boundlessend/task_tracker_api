@@ -1,5 +1,5 @@
 import os
-from enum import StrEnum
+from enum import Enum
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,12 +9,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
-class AppEnv(StrEnum):
+class AppEnv(str, Enum):
     DEV = "dev"
     TEST = "test"
 
 
-class LogLevel(StrEnum):
+class LogLevel(str, Enum):
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
