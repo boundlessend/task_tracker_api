@@ -1,0 +1,30 @@
+# git / ide
+.git
+.gitignore
+.idea
+.vscode
+
+# локальные окружения и секреты
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+
+# python cache / build artifacts
+__pycache__/
+**/__pycache__/
+*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# локальные файлы разработки
+compose.override.yaml

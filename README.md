@@ -18,13 +18,6 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-win powershell:
-
-```powershell
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
 ### 3. установить зависимости
 
 ```bash
@@ -55,13 +48,6 @@ macOS / linux:
 ```bash
 cp .env.example .env.dev
 cp .env.example .env.test
-```
-
-win powershell:
-
-```powershell
-Copy-Item .env.example .env.dev
-Copy-Item .env.example .env.test
 ```
 
 после нужно поправить значения под нужный режим
@@ -112,4 +98,78 @@ pytest .
 
 ```bash
 make test
+```
+
+## запуск через docker
+
+### собрать образ
+
+```bash
+docker build -t task-tracker-api .
+```
+
+### запустить контейнер напрямую
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e APP_ENV=dev \
+  -e APP_HOST=0.0.0.0 \
+  -e APP_PORT=8000 \
+  task-tracker-api
+```
+
+### проверить health из контейнера
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+ожидается:
+
+```json
+{"status":"ok","service":"Task Tracker API","env":"dev","debug":false}
+```
+
+## docker compose
+
+### поднять приложение одной командой
+
+```bash
+docker compose up --build
+```
+
+### запустить в фоне
+
+```bash
+docker compose up -d --build
+```
+
+### посмотреть логи
+
+```bash
+docker compose logs -f app
+```
+
+### остановить проект
+
+```bash
+docker compose down
+```
+
+### пересобрать образ без кеша
+
+```bash
+docker compose build --no-cache
+```
+
+### проверить health после запуска
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+### тесты через тот же compose-файл
+
+```bash
+docker compose --profile test run --rm tests
 ```
