@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import logging
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 
-from app.api.health import router as health_router
+from app.api.router import api_router
+from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.settings import AppEnv, get_settings
+from app.core.settings import AppEnv, Settings, get_settings
 
-settings = get_settings()
-configure_logging(settings.log_level.value)
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings = get_settings()
     logger.info(
         "Запускаем шарманку | env=%s | port=%s | debug=%s",
         settings.app_env.value,
@@ -25,13 +27,17 @@ async def lifespan(_: FastAPI):
     logger.info("Останавливаем шарманку :(")
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings.log_level.value)
+
     app = FastAPI(
         title=settings.app_name,
         debug=settings.debug,
         lifespan=lifespan,
     )
-    app.include_router(health_router)
+    register_exception_handlers(app)
+    app.include_router(api_router)
     return app
 
 
@@ -39,6 +45,7 @@ app = create_app()
 
 
 def run() -> None:
+    settings = get_settings()
     uvicorn.run(
         "app.main:app",
         host=settings.app_host,

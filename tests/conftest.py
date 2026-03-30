@@ -1,6 +1,10 @@
+import os
+
 import pytest
 
 from app.core.settings import get_settings
+
+os.environ["APP_ENV"] = "test"
 
 
 @pytest.fixture(autouse=True)

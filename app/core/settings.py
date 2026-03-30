@@ -8,6 +8,8 @@ from pathlib import Path
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.errors import AppConfigurationError
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -46,7 +48,7 @@ def env_files_for(app_env: str | AppEnv) -> tuple[Path, ...]:
         return (BASE_DIR / f".env.{AppEnv(app_env).value}",)
     except ValueError as exc:
         allowed = ", ".join(env.value for env in AppEnv)
-        raise RuntimeError(
+        raise AppConfigurationError(
             f"Неверный APP_ENV: {app_env!r}. Можно только такие значения: {allowed}."
         ) from exc
 
@@ -66,4 +68,4 @@ def get_settings() -> Settings:
             _env_file=env_files_for(os.getenv("APP_ENV", AppEnv.DEV.value))
         )
     except ValidationError as exc:
-        raise RuntimeError(_format_validation_error(exc)) from exc
+        raise AppConfigurationError(_format_validation_error(exc)) from exc
