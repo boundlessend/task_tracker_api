@@ -2,14 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from app.core.errors import AppConfigurationError
 from app.core.settings import AppEnv, LogLevel, get_settings
-
-
-@pytest.fixture(autouse=True)
-def clear_settings_cache() -> None:
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
 
 
 def write_env_file(
@@ -36,7 +30,7 @@ def write_env_file(
     )
 
 
-def test_invalid_app_port_raises_runtime_error(
+def test_invalid_app_port_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -48,11 +42,11 @@ def test_invalid_app_port_raises_runtime_error(
         "app.core.settings.env_files_for", lambda app_env: (env_file,)
     )
 
-    with pytest.raises(RuntimeError, match="APP_PORT"):
+    with pytest.raises(AppConfigurationError, match="APP_PORT"):
         get_settings()
 
 
-def test_invalid_debug_raises_runtime_error(
+def test_invalid_debug_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -64,11 +58,11 @@ def test_invalid_debug_raises_runtime_error(
         "app.core.settings.env_files_for", lambda app_env: (env_file,)
     )
 
-    with pytest.raises(RuntimeError, match="DEBUG"):
+    with pytest.raises(AppConfigurationError, match="DEBUG"):
         get_settings()
 
 
-def test_invalid_log_level_raises_runtime_error(
+def test_invalid_log_level_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -80,7 +74,7 @@ def test_invalid_log_level_raises_runtime_error(
         "app.core.settings.env_files_for", lambda app_env: (env_file,)
     )
 
-    with pytest.raises(RuntimeError, match="LOG_LEVEL"):
+    with pytest.raises(AppConfigurationError, match="LOG_LEVEL"):
         get_settings()
 
 
