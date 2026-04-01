@@ -1,5 +1,15 @@
 # Task Tracker API
 
+## что изменено в проекте
+
+- проект подключен к `PostgreSQL` через `SQLAlchemy`
+- миграции ведутся через `Alembic`
+- таблицы `users`, `tasks`, `comments` создаются первой миграцией
+- таблица `task_history` и индексы добавляются второй миграцией
+- создание и чтение задач и комментариев работают через SQL, а данные не пропадают после перезапуска
+- для списка задач есть отдельный SQL-сценарий с фильтрами и сортировкой
+- для поиска и сводки по статусам есть отдельные SQL-запросы
+
 ## локальный запуск
 
 ### 1. клонировать репозиторий
@@ -29,63 +39,159 @@ python -m pip install -r requirements-dev.txt
 
 в проекте три файла с настройками:
 
-- `.env.example` — **шаблон** и список нужных переменных
-- `.env.dev` — **реальный** конфиг для локального запуска
-- `.env.test` — **реальный** конфиг для тестов
-
-приложение **не читает** `.env.example` напрямую.
+- `.env.example` — шаблон и список нужных переменных
+- `.env.dev` — локальный конфиг для разработки
+- `.env.test` — конфиг для тестов
 
 приложение читает профиль по флагу `APP_ENV`:
 - `APP_ENV=dev` → загружается `.env.dev`
 - `APP_ENV=test` → загружается `.env.test`
 
-### как пользоваться `.env.example`
+ключевые переменные для базы:
 
-если в проекте ещё нет `.env.dev` или `.env.test`, их удобно создавать на основе шаблона.
+- `DATABASE_URL` — строка подключения к базе
+- `DATABASE_ECHO` — печатать ли SQL в логи
 
-macOS / linux:
+## запуск PostgreSQL и миграций
 
-```bash
-cp .env.example .env.dev
-cp .env.example .env.test
-```
+### docker compose
 
-после нужно поправить значения под нужный режим
-Например:
-- в `.env.dev` оставить `APP_ENV=dev`
-- в `.env.test` поставить `APP_ENV=test`
-- при необходимости развести порты и флаги `DEBUG`
-
-### 4. запустить проект
-
-основной способ:
+поднять базу, применить миграции и запустить приложение:
 
 ```bash
-python -m app
+docker compose up --build
 ```
 
-(опционально) если установлен `make`:
+после запуска будут доступны:
+
+- `PostgreSQL` на `127.0.0.1:5432`
+- API на `http://127.0.0.1:8000`
+
+отдельные полезные команды:
 
 ```bash
-make run
+docker compose up -d db
+docker compose run --rm migrate
+docker compose logs -f app
+docker compose down
 ```
 
-после старта сервис будет тут:
+## как проверить что миграции применились
 
-```text
-http://127.0.0.1:8000
+посмотреть текущую ревизию:
+
+```bash
+alembic current
 ```
 
-## проверка health-эндпоинта
+посмотреть историю:
+
+```bash
+alembic history
+```
+
+проверить таблицы в базе можно так:
+
+```sql
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = 'public'
+ORDER BY table_name;
+```
+
+ожидаются таблицы:
+
+- `alembic_version`
+- `users`
+- `tasks`
+- `comments`
+- `task_history`
+
+## основные эндпоинты
+
+### health
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-ожидается:
+### пользователи
 
-```json
-{"status":"ok","service":"Task Tracker API","env":"dev","debug":true}
+создать пользователя:
+
+```bash
+curl -X POST http://127.0.0.1:8000/users \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "username": "misha",
+    "email": "misha@example.com",
+    "full_name": "Майкл Джордан"
+  }'
+```
+
+### задачи
+
+создать задачу:
+
+```bash
+curl -X POST http://127.0.0.1:8000/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Поднять PostgreSQL",
+    "description": "Добавить docker compose и миграции",
+    "author_id": 1,
+    "assignee_id": 1,
+    "status": "todo"
+  }'
+```
+
+получить список задач с фильтрами и сортировкой:
+
+```bash
+curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=1&sort_by=updated_at&sort_order=desc'
+```
+
+поиск по задачам:
+
+```bash
+curl 'http://127.0.0.1:8000/tasks/search?q=миграц'
+```
+
+сводка по статусам:
+
+```bash
+curl 'http://127.0.0.1:8000/tasks/summary/statuses'
+```
+
+обновить статус задачи:
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/tasks/1/status \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "status": "done",
+    "changed_by_user_id": 1
+  }'
+```
+
+### комментарии
+
+создать комментарий:
+
+```bash
+curl -X POST http://127.0.0.1:8000/comments \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "task_id": 1,
+    "author_id": 1,
+    "text": "Историю изменений тоже добавим"
+  }'
+```
+
+список комментариев по задаче:
+
+```bash
+curl 'http://127.0.0.1:8000/comments?task_id=1'
 ```
 
 ## запуск тестов
@@ -94,82 +200,15 @@ curl http://127.0.0.1:8000/health
 pytest .
 ```
 
-или, если есть `make`:
+или:
 
 ```bash
 make test
 ```
 
-## запуск через docker
+тесты используют отдельную `sqlite`-базу и перед каждым запуском прогоняют миграции `Alembic`.
 
-### собрать образ
+## структура миграций
 
-```bash
-docker build -t task-tracker-api .
-```
-
-### запустить контейнер напрямую
-
-```bash
-docker run --rm -p 8000:8000 \
-  -e APP_ENV=dev \
-  -e APP_HOST=0.0.0.0 \
-  -e APP_PORT=8000 \
-  task-tracker-api
-```
-
-### проверить health из контейнера
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-ожидается:
-
-```json
-{"status":"ok","service":"Task Tracker API","env":"dev","debug":false}
-```
-
-## docker compose
-
-### поднять приложение одной командой
-
-```bash
-docker compose up --build
-```
-
-### запустить в фоне
-
-```bash
-docker compose up -d --build
-```
-
-### посмотреть логи
-
-```bash
-docker compose logs -f app
-```
-
-### остановить проект
-
-```bash
-docker compose down
-```
-
-### пересобрать образ без кеша
-
-```bash
-docker compose build --no-cache
-```
-
-### проверить health после запуска
-
-```bash
-curl http://127.0.0.1:8000/health
-```
-
-### тесты через тот же compose-файл
-
-```bash
-docker compose --profile test run --rm tests
-```
+- `0001_initial_tables` — создает `users`, `tasks`, `comments`, связи и базовые ограничения
+- `0002_task_history_and_indexes` — добавляет `task_history` и индексы под реальные сценарии чтения

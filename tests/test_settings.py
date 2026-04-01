@@ -13,8 +13,10 @@ def write_env_file(
     app_port: str = "8000",
     debug: str = "true",
     log_level: str = "INFO",
-    secret_key: str = "test-secret-key",
+    database_url: str = "sqlite+pysqlite:///./settings-test.db",
 ) -> None:
+    """записывает временный env-файл для теста"""
+
     path.write_text(
         "\n".join(
             [
@@ -23,7 +25,8 @@ def write_env_file(
                 f"APP_PORT={app_port}",
                 f"DEBUG={debug}",
                 f"LOG_LEVEL={log_level}",
-                f"SECRET_KEY={secret_key}",
+                f"DATABASE_URL={database_url}",
+                "DATABASE_ECHO=false",
             ]
         ),
         encoding="utf-8",
@@ -34,6 +37,8 @@ def test_invalid_app_port_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """проверяет валидацию порта приложения"""
+
     env_file = tmp_path / ".env.dev"
     write_env_file(env_file, app_port="70000")
 
@@ -50,6 +55,8 @@ def test_invalid_debug_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """проверяет валидацию debug"""
+
     env_file = tmp_path / ".env.dev"
     write_env_file(env_file, debug="not-a-bool")
 
@@ -66,6 +73,8 @@ def test_invalid_log_level_raises_app_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """проверяет валидацию уровня логирования"""
+
     env_file = tmp_path / ".env.dev"
     write_env_file(env_file, log_level="LOUD")
 
@@ -82,6 +91,8 @@ def test_app_env_switches_profile(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """проверяет переключение env-профиля"""
+
     dev_file = tmp_path / ".env.dev"
     test_file = tmp_path / ".env.test"
 

@@ -16,18 +16,22 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """управляет жизненным циклом приложения"""
+
     settings = get_settings()
     logger.info(
-        "Запускаем шарманку | env=%s | port=%s | debug=%s",
+        "Запускаем приложение | env=%s | port=%s | debug=%s",
         settings.app_env.value,
         settings.app_port,
         settings.debug,
     )
     yield
-    logger.info("Останавливаем шарманку :(")
+    logger.info("Останавливаем приложение")
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    """создает экземпляр fastapi приложения"""
+
     settings = settings or get_settings()
     configure_logging(settings.log_level.value)
 
@@ -45,6 +49,8 @@ app = create_app()
 
 
 def run() -> None:
+    """запускает uvicorn сервер"""
+
     settings = get_settings()
     uvicorn.run(
         "app.main:app",

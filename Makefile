@@ -3,7 +3,13 @@ install:
 	python -m pip install -r requirements-dev.txt
 
 run:
-	python -m app
+	docker compose up --build
+
+db-up:
+	docker compose up -d db
+
+migrate:
+	alembic upgrade head
 
 test:
 	pytest

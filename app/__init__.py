@@ -1,1 +1,1 @@
-"""Task Tracker API package."""
+"""пакет task tracker api"""

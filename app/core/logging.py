@@ -1,9 +1,10 @@
 import logging
 
 
-def configure_logging(log_level: str) -> None:
+def configure_logging(level: str) -> None:
+    """настраивает базовое логирование приложения"""
+
     logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
+        level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        force=True,
     )

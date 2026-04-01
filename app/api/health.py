@@ -9,6 +9,8 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 def healthcheck() -> dict[str, str | bool]:
+    """возвращает статус приложения"""
+
     settings = get_settings()
     return {
         "status": "ok",

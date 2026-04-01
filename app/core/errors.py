@@ -1,18 +1,24 @@
 class AppError(RuntimeError):
-    """Базовая ошибка."""
+    """базовая ошибка приложения"""
 
     def __init__(self, message: str) -> None:
+        """сохраняет сообщение ошибки"""
+
         super().__init__(message)
         self.message = message
 
 
 class AppConfigurationError(AppError):
-    """Возникает при неверных настройках приложения."""
+    """ошибка конфигурации приложения"""
 
 
 class TaskTrackerError(AppError):
-    """Базовая ошибка таск-трекера."""
+    """базовая ошибка домена задач"""
 
 
 class TaskNotFoundError(TaskTrackerError):
-    """Возникает когда таск не найден."""
+    """задача не найдена"""
+
+
+class DataIntegrityError(TaskTrackerError):
+    """нарушение ограничений данных"""

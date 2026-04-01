@@ -12,6 +12,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM base AS runtime
 
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY app ./app
 
 EXPOSE 8000
@@ -24,8 +26,11 @@ FROM base AS test
 COPY requirements-dev.txt .
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY app ./app
 COPY tests ./tests
 COPY pytest.ini .
+COPY .env.test ./
 
 CMD ["pytest", "-q"]

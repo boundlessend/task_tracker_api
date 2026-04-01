@@ -14,11 +14,15 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class AppEnv(str, Enum):
+    """доступные окружения приложения"""
+
     DEV = "dev"
     TEST = "test"
 
 
 class LogLevel(str, Enum):
+    """доступные уровни логирования"""
+
     DEBUG = "DEBUG"
     INFO = "INFO"
     WARNING = "WARNING"
@@ -27,13 +31,16 @@ class LogLevel(str, Enum):
 
 
 class Settings(BaseSettings):
+    """описывает настройки приложения"""
+
     app_name: str = "Task Tracker API"
     app_env: AppEnv = AppEnv.DEV
     app_host: str = Field(default="127.0.0.1", min_length=1)
     app_port: int = Field(default=8000, ge=1, le=65535)
     debug: bool = False
     log_level: LogLevel = LogLevel.INFO
-    secret_key: str = Field(default="misha_privet", min_length=8)
+    database_url: str = Field(min_length=1)
+    database_echo: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="",
@@ -44,18 +51,25 @@ class Settings(BaseSettings):
 
 
 def env_files_for(app_env: str | AppEnv) -> tuple[Path, ...]:
+    """возвращает env-файл для выбранного окружения"""
+
     try:
         return (BASE_DIR / f".env.{AppEnv(app_env).value}",)
     except ValueError as exc:
         allowed = ", ".join(env.value for env in AppEnv)
         raise AppConfigurationError(
-            f"Неверный APP_ENV: {app_env!r}. Можно только такие значения: {allowed}."
+            f"Неверный APP_ENV: {app_env!r}. Допустимые значения: {allowed}."
         ) from exc
 
 
 def _format_validation_error(exc: ValidationError) -> str:
+    """собирает читаемую ошибку валидации настроек"""
+
     parts = [
-        f"{(err.get('loc') or ['UNKNOWN'])[0].upper()}: {err.get('msg', 'Неверное значение')}"
+        (
+            f"{(err.get('loc') or ['UNKNOWN'])[0].upper()}: "
+            f"{err.get('msg', 'Неверное значение')}"
+        )
         for err in exc.errors()
     ]
     return "Неверные настройки приложения. " + "; ".join(parts)
@@ -63,6 +77,8 @@ def _format_validation_error(exc: ValidationError) -> str:
 
 @lru_cache
 def get_settings() -> Settings:
+    """читает и кеширует настройки приложения"""
+
     try:
         return Settings(
             _env_file=env_files_for(os.getenv("APP_ENV", AppEnv.DEV.value))
