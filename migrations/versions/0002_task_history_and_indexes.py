@@ -47,8 +47,65 @@ def upgrade() -> None:
             ["changed_by_user_id"],
             ["users.id"],
             name="fk_task_history_changed_by_user_id_users",
+            ondelete="RESTRICT",
         ),
     )
+
+    op.execute(
+        """
+        UPDATE users
+        SET full_name = username
+        WHERE full_name IS NULL OR trim(full_name) = ''
+        """
+    )
+
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.alter_column(
+            "full_name",
+            existing_type=sa.String(length=255),
+            nullable=False,
+        )
+
+    op.create_index(
+        "uq_users_email_lower",
+        "users",
+        [sa.text("lower(email)")],
+        unique=True,
+    )
+
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.drop_constraint(
+            "fk_tasks_author_id_users", type_="foreignkey"
+        )
+        batch_op.drop_constraint(
+            "fk_tasks_assignee_id_users", type_="foreignkey"
+        )
+        batch_op.create_foreign_key(
+            "fk_tasks_author_id_users",
+            "users",
+            ["author_id"],
+            ["id"],
+            ondelete="RESTRICT",
+        )
+        batch_op.create_foreign_key(
+            "fk_tasks_assignee_id_users",
+            "users",
+            ["assignee_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+
+    with op.batch_alter_table("comments") as batch_op:
+        batch_op.drop_constraint(
+            "fk_comments_author_id_users", type_="foreignkey"
+        )
+        batch_op.create_foreign_key(
+            "fk_comments_author_id_users",
+            "users",
+            ["author_id"],
+            ["id"],
+            ondelete="RESTRICT",
+        )
 
     op.create_index(
         "ix_tasks_status_created_at",
@@ -105,4 +162,44 @@ def downgrade() -> None:
     op.drop_index("ix_tasks_author_status_created_at", table_name="tasks")
     op.drop_index("ix_tasks_status_updated_at", table_name="tasks")
     op.drop_index("ix_tasks_status_created_at", table_name="tasks")
+    op.drop_index("uq_users_email_lower", table_name="users")
+
+    with op.batch_alter_table("comments") as batch_op:
+        batch_op.drop_constraint(
+            "fk_comments_author_id_users", type_="foreignkey"
+        )
+        batch_op.create_foreign_key(
+            "fk_comments_author_id_users",
+            "users",
+            ["author_id"],
+            ["id"],
+        )
+
+    with op.batch_alter_table("tasks") as batch_op:
+        batch_op.drop_constraint(
+            "fk_tasks_author_id_users", type_="foreignkey"
+        )
+        batch_op.drop_constraint(
+            "fk_tasks_assignee_id_users", type_="foreignkey"
+        )
+        batch_op.create_foreign_key(
+            "fk_tasks_author_id_users",
+            "users",
+            ["author_id"],
+            ["id"],
+        )
+        batch_op.create_foreign_key(
+            "fk_tasks_assignee_id_users",
+            "users",
+            ["assignee_id"],
+            ["id"],
+        )
+
+    with op.batch_alter_table("users") as batch_op:
+        batch_op.alter_column(
+            "full_name",
+            existing_type=sa.String(length=255),
+            nullable=True,
+        )
+
     op.drop_table("task_history")

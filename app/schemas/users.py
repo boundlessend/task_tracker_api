@@ -10,7 +10,7 @@ class UserCreate(BaseModel):
 
     username: str = Field(min_length=3, max_length=64)
     email: EmailStr
-    full_name: str | None = Field(default=None, max_length=255)
+    full_name: str = Field(min_length=1, max_length=255)
 
 
 class UserRead(BaseModel):
@@ -21,5 +21,5 @@ class UserRead(BaseModel):
     id: int
     username: str
     email: EmailStr
-    full_name: str | None = None
+    full_name: str
     created_at: datetime

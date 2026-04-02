@@ -238,3 +238,65 @@ def test_task_history_is_written_for_create_status_and_comment(
             "comment_text": None,
         },
     ]
+
+
+def test_postgres_flow_and_case_insensitive_email_unique(
+    migrated_postgres_db: str,
+) -> None:
+    """проверяет postgres сценарий и новые ограничения схемы"""
+
+    client = TestClient(create_app())
+
+    first_user = client.post(
+        "/users",
+        json={
+            "username": "postgres_user",
+            "email": "postgres@example.com",
+            "full_name": "Postgres User",
+        },
+    )
+    assert first_user.status_code == 201
+
+    duplicate_email = client.post(
+        "/users",
+        json={
+            "username": "postgres_user_2",
+            "email": "POSTGRES@example.com",
+            "full_name": "Postgres User Two",
+        },
+    )
+    assert duplicate_email.status_code == 400
+
+    task_response = client.post(
+        "/tasks",
+        json={
+            "title": "Проверить PostgreSQL",
+            "description": "Нужен прямой интеграционный тест",
+            "author_id": first_user.json()["id"],
+            "assignee_id": first_user.json()["id"],
+            "status": "todo",
+        },
+    )
+    assert task_response.status_code == 201
+
+    comment_response = client.post(
+        "/comments",
+        json={
+            "task_id": task_response.json()["id"],
+            "author_id": first_user.json()["id"],
+            "text": "Комментарий в PostgreSQL",
+        },
+    )
+    assert comment_response.status_code == 201
+
+    tasks_response = client.get(
+        "/tasks",
+        params={
+            "status": "todo",
+            "sort_by": "updated_at",
+            "sort_order": "desc",
+        },
+    )
+    assert tasks_response.status_code == 200
+    assert len(tasks_response.json()) == 1
+    assert tasks_response.json()[0]["comment_count"] == 1

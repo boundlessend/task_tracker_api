@@ -27,15 +27,14 @@ SELECT
     t.due_date,
     t.created_at,
     t.updated_at,
-    COALESCE(comment_stats.comment_count, 0) AS comment_count
+    (
+        SELECT COUNT(*)
+        FROM comments comment_source
+        WHERE comment_source.task_id = t.id
+    ) AS comment_count
 FROM tasks t
 JOIN users author_user ON author_user.id = t.author_id
 LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_id
-LEFT JOIN (
-    SELECT task_id, COUNT(*) AS comment_count
-    FROM comments
-    GROUP BY task_id
-) AS comment_stats ON comment_stats.task_id = t.id
 """
 
 SORT_COLUMN_MAP = {
