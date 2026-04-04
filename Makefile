@@ -27,6 +27,7 @@ lint:
 	flake8
 
 test:
+	TEST_POSTGRES_DATABASE_URL=postgresql+psycopg://task_tracker:task_tracker@127.0.0.1:5432/task_tracker_test \
 	pytest -q
 
 check: format-check lint test

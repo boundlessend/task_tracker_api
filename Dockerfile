@@ -12,12 +12,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 FROM base AS runtime
 
-COPY alembic.ini ./
-COPY migrations ./migrations
-COPY app ./app
+COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
+COPY app /app/app
 
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "-m", "app"]
 
 
@@ -27,11 +29,12 @@ COPY requirements-dev.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-dev.txt
 
-COPY alembic.ini ./
-COPY migrations ./migrations
-COPY app ./app
-COPY tests ./tests
-COPY pytest.ini .
-COPY .env.test ./
+COPY --chmod=755 entrypoint.sh /app/entrypoint.sh
+COPY alembic.ini /app/alembic.ini
+COPY migrations /app/migrations
+COPY app /app/app
+COPY tests /app/tests
+COPY pytest.ini /app/pytest.ini
+COPY .env.test /app/.env.test
 
 CMD ["pytest", "-q"]

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     log_level: LogLevel = LogLevel.INFO
     database_url: str = Field(min_length=1)
     database_echo: bool = False
+    fake_database_url: str = Field(min_length=1)
 
     model_config = SettingsConfigDict(
         env_prefix="",
