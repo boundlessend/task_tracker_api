@@ -1,125 +1,110 @@
 # Task Tracker API
 
-## локальный запуск
-
-### 1. клонировать репозиторий
-
-```bash
-git clone git@github.com:boundlessend/task_tracker_api.git
-cd task_tracker_api
-```
-
-### 2. создать и активировать виртуальное окружение
-
-macOS / linux:
+## установка
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-### 3. установить зависимости
-
-```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 ```
 
-## как устроены env-файлы
+## локальный запуск
 
-в проекте три файла с настройками:
+```bash
+cp .env.example .env.dev
+python -m app
+```
 
-- `.env.example` — шаблон и список нужных переменных
-- `.env.dev` — локальный конфиг для разработки
-- `.env.test` — конфиг для тестов
+Swagger UI:
 
-приложение читает профиль по флагу `APP_ENV`:
-- `APP_ENV=dev` → загружается `.env.dev`
-- `APP_ENV=test` → загружается `.env.test`
+```text
+http://127.0.0.1:8000/docs
+```
 
-ключевые переменные для базы:
-
-- `DATABASE_URL` — строка подключения к базе
-- `DATABASE_ECHO` — печатать ли SQL в логи
-
-## запуск PostgreSQL и миграций
-
-### docker compose
-
-поднять базу, применить миграции и запустить приложение:
+## запуск через docker compose
 
 ```bash
 docker compose up --build
 ```
 
-после запуска будут доступны:
+## миграции
 
-- `PostgreSQL` на `127.0.0.1:5432`
-- API на `http://127.0.0.1:8000/docs`
-
-отдельные полезные команды:
+применить миграции:
 
 ```bash
-docker compose up -d db
-docker compose run --rm migrate
-docker compose logs -f app
-docker compose down
+alembic upgrade head
 ```
 
-## как проверить что миграции применились
-
-посмотреть текущую ревизию:
+текущая ревизия:
 
 ```bash
 alembic current
 ```
 
-посмотреть историю:
+## основные команды make
+
+установить зависимости:
 
 ```bash
-alembic history
+make install
 ```
 
-проверить таблицы в базе можно так:
-
-```sql
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
-```
-
-ожидаются таблицы:
-
-- `alembic_version`
-- `users`
-- `tasks`
-- `comments`
-- `task_history`
-
-## основные эндпоинты
-
-### health
+поднять приложение локально:
 
 ```bash
-curl http://127.0.0.1:8000/health
+make run-local
 ```
 
-### пользователи
-
-создать пользователя:
+поднять через docker compose:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/users \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "username": "misha",
-    "email": "misha@example.com",
-    "full_name": "Майкл Джордан"
-  }'
+make run
 ```
 
-### задачи
+применить миграции:
+
+```bash
+make migrate
+```
+
+форматировать код:
+
+```bash
+make format
+```
+
+проверить форматирование:
+
+```bash
+make format-check
+```
+
+запустить flake8:
+
+```bash
+make lint
+```
+
+Запустить тесты:
+
+```bash
+make test
+```
+
+Запустить все проверки:
+
+```bash
+make check
+```
+
+Остановить docker compose:
+
+```bash
+make down
+```
+
+## примеры ручек
 
 создать задачу:
 
@@ -127,78 +112,60 @@ curl -X POST http://127.0.0.1:8000/users \
 curl -X POST http://127.0.0.1:8000/tasks \
   -H 'Content-Type: application/json' \
   -d '{
-    "title": "Поднять PostgreSQL",
-    "description": "Добавить docker compose и миграции",
+    "title": "Подготовить api note",
+    "description": "Согласовать контракт",
     "author_id": 1,
-    "assignee_id": 1,
+    "assignee_id": 2,
     "status": "todo"
   }'
 ```
 
-получить список задач с фильтрами и сортировкой:
+получить список задач:
 
 ```bash
-curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=1&sort_by=updated_at&sort_order=desc'
+curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=2&sort_by=updated_at&sort_order=desc'
 ```
 
-поиск по задачам:
+обновить задачу:
 
 ```bash
-curl 'http://127.0.0.1:8000/tasks/search?q=миграц'
-```
-
-сводка по статусам:
-
-```bash
-curl 'http://127.0.0.1:8000/tasks/summary/statuses'
-```
-
-обновить статус задачи:
-
-```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/1/status \
+curl -X PATCH http://127.0.0.1:8000/tasks/12 \
   -H 'Content-Type: application/json' \
   -d '{
-    "status": "done",
-    "changed_by_user_id": 1
+    "title": "Подготовить краткий api note",
+    "description": null
   }'
 ```
 
-### комментарии
-
-создать комментарий:
+назначить исполнителя:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/comments \
+curl -X POST http://127.0.0.1:8000/tasks/12/assign \
   -H 'Content-Type: application/json' \
   -d '{
-    "task_id": 1,
+    "assignee_id": 2
+  }'
+```
+
+добавить комментарий:
+
+```bash
+curl -X POST http://127.0.0.1:8000/tasks/12/comments \
+  -H 'Content-Type: application/json' \
+  -d '{
     "author_id": 1,
-    "text": "Историю изменений тоже добавим"
+    "text": "Первый комментарий"
   }'
 ```
 
-список комментариев по задаче:
+получить саммари:
 
 ```bash
-curl 'http://127.0.0.1:8000/comments?task_id=1'
+curl http://127.0.0.1:8000/tasks/summary
 ```
 
-## запуск тестов
+выгрузить CSV:
 
 ```bash
-pytest .
+curl -OJ http://127.0.0.1:8000/tasks/export
 ```
-
-или:
-
-```bash
-make test
-```
-
-тесты используют отдельную `sqlite`-базу и перед каждым запуском прогоняют миграции `Alembic`
-
-## структура миграций
-
-- `0001_initial_tables` — создает `users`, `tasks`, `comments`, связи и базовые ограничения
-- `0002_task_history_and_indexes` — добавляет `task_history` и индексы под реальные сценарии чтения

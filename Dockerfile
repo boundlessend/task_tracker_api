@@ -24,7 +24,8 @@ CMD ["python", "-m", "app"]
 FROM base AS test
 
 COPY requirements-dev.txt .
-RUN pip install --no-cache-dir -r requirements-dev.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-dev.txt
 
 COPY alembic.ini ./
 COPY migrations ./migrations

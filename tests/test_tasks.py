@@ -5,30 +5,40 @@ from app.db.session import get_engine
 from app.main import create_app
 
 
+def _create_user(client: TestClient, *, username: str, email: str) -> int:
+    """создает пользователя и возвращает его id"""
+
+    response = client.post(
+        "/users",
+        json={
+            "username": username,
+            "email": email,
+            "full_name": username.title(),
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["id"]
+
+
 def test_tasks_are_saved_in_database_between_requests(
     migrated_sqlite_db: str,
 ) -> None:
     """проверяет что задачи сохраняются в базе данных"""
 
     client = TestClient(create_app())
-
-    author = client.post(
-        "/users",
-        json={
-            "username": "maria",
-            "email": "maria@example.com",
-            "full_name": "Мария Смирнова",
-        },
+    author_id = _create_user(
+        client,
+        username="maria",
+        email="maria@example.com",
     )
-    assert author.status_code == 201
 
     task_response = client.post(
         "/tasks",
         json={
             "title": "Поднять PostgreSQL",
             "description": "Добавить docker compose и миграции",
-            "author_id": author.json()["id"],
-            "assignee_id": author.json()["id"],
+            "author_id": author_id,
+            "assignee_id": author_id,
             "status": "todo",
         },
     )
@@ -38,106 +48,143 @@ def test_tasks_are_saved_in_database_between_requests(
     tasks_response = second_client.get("/tasks")
     assert tasks_response.status_code == 200
     body = tasks_response.json()
-    assert len(body) == 1
-    assert body[0]["title"] == "Поднять PostgreSQL"
-    assert body[0]["status"] == "todo"
-    assert body[0]["author_username"] == "maria"
+    assert body["meta"] == {
+        "limit": 50,
+        "offset": 0,
+        "count": 1,
+        "total": 1,
+    }
+    assert len(body["items"]) == 1
+    assert body["items"][0]["title"] == "Поднять PostgreSQL"
+    assert body["items"][0]["status"] == "todo"
+    assert body["items"][0]["author_username"] == "maria"
+    assert body["items"][0]["archived_at"] is None
 
 
-def test_task_filters_search_summary_and_comments(
+def test_task_contract_endpoints_work_together(
     migrated_sqlite_db: str,
 ) -> None:
-    """проверяет sql-сценарии списка поиска сводки и комментариев"""
+    """проверяет новые ручки задач и форму ответов"""
 
     client = TestClient(create_app())
-
-    author_id = client.post(
-        "/users",
-        json={
-            "username": "ivan",
-            "email": "ivan@example.com",
-            "full_name": "Иван Петров",
-        },
-    ).json()["id"]
-    assignee_id = client.post(
-        "/users",
-        json={
-            "username": "anna",
-            "email": "anna@example.com",
-            "full_name": "Анна Иванова",
-        },
-    ).json()["id"]
-
-    first_task = client.post(
-        "/tasks",
-        json={
-            "title": "Сделать первую миграцию",
-            "description": "Создать users, tasks, comments",
-            "author_id": author_id,
-            "assignee_id": assignee_id,
-            "status": "in_progress",
-        },
+    author_id = _create_user(client, username="ivan", email="ivan@example.com")
+    assignee_id = _create_user(
+        client, username="anna", email="anna@example.com"
     )
-    second_task = client.post(
+
+    created_task = client.post(
         "/tasks",
         json={
-            "title": "Добавить индексы",
-            "description": "Нужны индексы для списка задач",
+            "title": "Подготовить api note",
+            "description": "Согласовать контракт",
             "author_id": author_id,
-            "assignee_id": assignee_id,
             "status": "todo",
         },
     )
-    assert first_task.status_code == 201
-    assert second_task.status_code == 201
+    assert created_task.status_code == 201
+    task_id = created_task.json()["id"]
 
-    comment = client.post(
-        "/comments",
+    fetched_task = client.get(f"/tasks/{task_id}")
+    assert fetched_task.status_code == 200
+    assert fetched_task.json()["title"] == "Подготовить api note"
+
+    patched_task = client.patch(
+        f"/tasks/{task_id}",
         json={
-            "task_id": first_task.json()["id"],
-            "author_id": author_id,
-            "text": "Историю изменений тоже добавим",
+            "description": None,
+            "due_date": None,
+            "title": "Подготовить краткий api note",
         },
     )
-    assert comment.status_code == 201
+    assert patched_task.status_code == 200
+    assert patched_task.json()["title"] == "Подготовить краткий api note"
+    assert patched_task.json()["description"] is None
 
-    filtered = client.get(
+    assign_response = client.post(
+        f"/tasks/{task_id}/assign",
+        json={"assignee_id": assignee_id},
+    )
+    assert assign_response.status_code == 200
+    assert assign_response.json()["assignee_id"] == assignee_id
+    assert assign_response.json()["assignee_username"] == "anna"
+
+    comment_response = client.post(
+        f"/tasks/{task_id}/comments",
+        json={
+            "author_id": author_id,
+            "text": "Первый комментарий",
+        },
+    )
+    assert comment_response.status_code == 201
+    assert comment_response.json()["task_id"] == task_id
+
+    comments_response = client.get(f"/tasks/{task_id}/comments")
+    assert comments_response.status_code == 200
+    assert comments_response.json() == [
+        {
+            "id": comment_response.json()["id"],
+            "task_id": task_id,
+            "author_id": author_id,
+            "author_username": "ivan",
+            "text": "Первый комментарий",
+            "created_at": comment_response.json()["created_at"],
+        }
+    ]
+
+    filtered_tasks = client.get(
         "/tasks",
         params={
-            "status": "in_progress",
+            "status": "todo",
             "assignee_id": assignee_id,
             "sort_by": "created_at",
             "sort_order": "asc",
         },
     )
-    assert filtered.status_code == 200
-    assert len(filtered.json()) == 1
-    assert filtered.json()[0]["comment_count"] == 1
+    assert filtered_tasks.status_code == 200
+    filtered_body = filtered_tasks.json()
+    assert filtered_body["meta"] == {
+        "limit": 50,
+        "offset": 0,
+        "count": 1,
+        "total": 1,
+    }
+    assert filtered_body["items"][0]["comment_count"] == 1
 
-    search = client.get("/tasks/search", params={"q": "миграц"})
-    assert search.status_code == 200
-    assert len(search.json()) == 1
-    assert search.json()[0]["title"] == "Сделать первую миграцию"
+    summary_response = client.get("/tasks/summary")
+    assert summary_response.status_code == 200
+    assert summary_response.json() == {
+        "total": 1,
+        "archived": 0,
+        "by_status": [{"status": "todo", "task_count": 1}],
+    }
 
-    summary = client.get("/tasks/summary/statuses")
-    assert summary.status_code == 200
-    assert summary.json() == [
-        {"status": "in_progress", "task_count": 1},
-        {"status": "todo", "task_count": 1},
-    ]
+    export_response = client.get("/tasks/export")
+    assert export_response.status_code == 200
+    assert export_response.headers["content-type"].startswith("text/csv")
+    assert "Подготовить краткий api note" in export_response.text
+    assert "author_username" in export_response.text
 
-    status_update = client.patch(
-        f"/tasks/{second_task.json()['id']}/status",
-        json={"status": "done", "changed_by_user_id": author_id},
+    archive_response = client.post(f"/tasks/{task_id}/archive")
+    assert archive_response.status_code == 200
+    assert archive_response.json()["archived_at"] is not None
+
+    second_archive = client.post(f"/tasks/{task_id}/archive")
+    assert second_archive.status_code == 409
+    assert second_archive.json()["error"]["code"] == "task_conflict"
+
+    forbidden_patch = client.patch(
+        f"/tasks/{task_id}",
+        json={"status": "done"},
     )
-    assert status_update.status_code == 200
-    assert status_update.json()["status"] == "done"
+    assert forbidden_patch.status_code == 422
+    assert forbidden_patch.json()["error"]["code"] == "validation_error"
 
-    comments = client.get(
-        "/comments", params={"task_id": first_task.json()["id"]}
+    null_title_patch = client.patch(
+        f"/tasks/{task_id}",
+        json={"title": None},
     )
-    assert comments.status_code == 200
-    assert comments.json()[0]["author_username"] == "ivan"
+    assert null_title_patch.status_code == 422
+    assert null_title_patch.json()["error"]["code"] == "validation_error"
 
 
 def test_task_history_is_written_for_create_status_and_comment(
@@ -146,23 +193,10 @@ def test_task_history_is_written_for_create_status_and_comment(
     """проверяет что история задачи пишется для ключевых действий"""
 
     client = TestClient(create_app())
-
-    author_id = client.post(
-        "/users",
-        json={
-            "username": "olga",
-            "email": "olga@example.com",
-            "full_name": "Ольга Соколова",
-        },
-    ).json()["id"]
-    assignee_id = client.post(
-        "/users",
-        json={
-            "username": "petr",
-            "email": "petr@example.com",
-            "full_name": "Пётр Орлов",
-        },
-    ).json()["id"]
+    author_id = _create_user(client, username="olga", email="olga@example.com")
+    assignee_id = _create_user(
+        client, username="petr", email="petr@example.com"
+    )
 
     created_task = client.post(
         "/tasks",
@@ -178,9 +212,8 @@ def test_task_history_is_written_for_create_status_and_comment(
     task_id = created_task.json()["id"]
 
     create_comment = client.post(
-        "/comments",
+        f"/tasks/{task_id}/comments",
         json={
-            "task_id": task_id,
             "author_id": assignee_id,
             "text": "Комментарий для истории",
         },
@@ -198,16 +231,16 @@ def test_task_history_is_written_for_create_status_and_comment(
             connection.execute(
                 text(
                     """
-                SELECT
-                    action,
-                    changed_by_user_id,
-                    old_status,
-                    new_status,
-                    comment_text
-                FROM task_history
-                WHERE task_id = :task_id
-                ORDER BY id ASC
-                """
+                    SELECT
+                        action,
+                        changed_by_user_id,
+                        old_status,
+                        new_status,
+                        comment_text
+                    FROM task_history
+                    WHERE task_id = :task_id
+                    ORDER BY id ASC
+                    """
                 ),
                 {"task_id": task_id},
             )
@@ -243,7 +276,7 @@ def test_task_history_is_written_for_create_status_and_comment(
 def test_postgres_flow_and_case_insensitive_email_unique(
     migrated_postgres_db: str,
 ) -> None:
-    """проверяет postgres сценарий и новые ограничения схемы"""
+    """проверяет postgres сценарий и ограничения схемы"""
 
     client = TestClient(create_app())
 
@@ -266,6 +299,7 @@ def test_postgres_flow_and_case_insensitive_email_unique(
         },
     )
     assert duplicate_email.status_code == 400
+    assert duplicate_email.json()["error"]["code"] == "data_integrity_error"
 
     task_response = client.post(
         "/tasks",
@@ -280,9 +314,8 @@ def test_postgres_flow_and_case_insensitive_email_unique(
     assert task_response.status_code == 201
 
     comment_response = client.post(
-        "/comments",
+        f"/tasks/{task_response.json()['id']}/comments",
         json={
-            "task_id": task_response.json()["id"],
             "author_id": first_user.json()["id"],
             "text": "Комментарий в PostgreSQL",
         },
@@ -298,5 +331,6 @@ def test_postgres_flow_and_case_insensitive_email_unique(
         },
     )
     assert tasks_response.status_code == 200
-    assert len(tasks_response.json()) == 1
-    assert tasks_response.json()[0]["comment_count"] == 1
+    body = tasks_response.json()
+    assert body["meta"]["count"] == 1
+    assert body["items"][0]["comment_count"] == 1
