@@ -10,9 +10,9 @@ def test_healthcheck_returns_ok(migrated_sqlite_db: str) -> None:
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "status": "ok",
-        "service": "Task Tracker API",
-        "env": "test",
-        "debug": False,
-    }
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["service"] == "Task Tracker API"
+    assert body["env"] == "test"
+    assert body["debug"] is False
+    assert body["database"]["ok"] is True

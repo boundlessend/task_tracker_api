@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.core.errors import AppConfigurationError
+from app.exceptions.errors import AppConfigurationError
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     log_level: LogLevel = LogLevel.INFO
     database_url: str = Field(min_length=1)
     database_echo: bool = False
-    fake_database_url: str = Field(min_length=1)
+    fake_database_url: str | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="",
@@ -59,7 +59,7 @@ def env_files_for(app_env: str | AppEnv) -> tuple[Path, ...]:
     except ValueError as exc:
         allowed = ", ".join(env.value for env in AppEnv)
         raise AppConfigurationError(
-            f"Неверный APP_ENV: {app_env!r}. Допустимые значения: {allowed}."
+            f"неверный APP_ENV: {app_env!r}. допустимые значения: {allowed}"
         ) from exc
 
 
@@ -69,11 +69,11 @@ def _format_validation_error(exc: ValidationError) -> str:
     parts = [
         (
             f"{(err.get('loc') or ['UNKNOWN'])[0].upper()}: "
-            f"{err.get('msg', 'Неверное значение')}"
+            f"{err.get('msg', 'неверное значение')}"
         )
         for err in exc.errors()
     ]
-    return "Неверные настройки приложения. " + "; ".join(parts)
+    return "неверные настройки приложения: " + "; ".join(parts)
 
 
 @lru_cache

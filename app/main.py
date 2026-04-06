@@ -6,19 +6,19 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
-from app.api.router import api_router
-from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.settings import AppEnv, Settings, get_settings
+from app.exceptions.handlers import register_exception_handlers
+from app.routers.router import api_router
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(app: FastAPI):
     """управляет жизненным циклом приложения"""
 
-    settings = get_settings()
+    settings: Settings = app.state.settings
     logger.info(
         "Запускаем приложение | env=%s | port=%s | debug=%s",
         settings.app_env.value,
@@ -40,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         debug=settings.debug,
         lifespan=lifespan,
     )
+    app.state.settings = settings
     register_exception_handlers(app)
     app.include_router(api_router)
     return app
