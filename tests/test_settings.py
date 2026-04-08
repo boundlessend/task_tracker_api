@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.core.errors import AppConfigurationError
+from app.exceptions.errors import AppConfigurationError
 from app.core.settings import AppEnv, LogLevel, get_settings
 
 

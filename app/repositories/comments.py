@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.errors import DataIntegrityError
+from app.exceptions.errors import DataIntegrityError
 from app.schemas.comments import CommentCreate, CommentRead
 
 

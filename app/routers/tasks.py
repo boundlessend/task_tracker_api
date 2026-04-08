@@ -196,10 +196,14 @@ def assign_task(
 ) -> TaskRead:
     """назначает исполнителя задаче"""
 
-    return service.assign_task(task_id=task_id, assignee_id=payload.assignee_id)
+    return service.assign_task(
+        task_id=task_id, assignee_id=payload.assignee_id
+    )
 
 
-@router.post("/{task_id}/comments", response_model=CommentRead, status_code=201)
+@router.post(
+    "/{task_id}/comments", response_model=CommentRead, status_code=201
+)
 def create_task_comment(
     task_id: int,
     payload: TaskCommentCreate,
