@@ -67,7 +67,9 @@ def test_task_contract_endpoints_work_together(
     """проверяет новые ручки задач и форму ответов"""
 
     client = TestClient(create_app())
-    author_id = _create_user(client, username="ivan", email="ivan@example.com")
+    author_id = _create_user(
+        client, username="ivan", email="ivan@example.com"
+    )
     assignee_id = _create_user(
         client, username="anna", email="anna@example.com"
     )
@@ -134,7 +136,7 @@ def test_task_contract_endpoints_work_together(
     filtered_tasks = client.get(
         "/tasks",
         params={
-            "status": "todo",
+            "status": "in_progress",
             "assignee_id": assignee_id,
             "sort_by": "created_at",
             "sort_order": "asc",
@@ -155,7 +157,7 @@ def test_task_contract_endpoints_work_together(
     assert summary_response.json() == {
         "total": 1,
         "archived": 0,
-        "by_status": [{"status": "todo", "task_count": 1}],
+        "by_status": [{"status": "in_progress", "task_count": 1}],
     }
 
     export_response = client.get("/tasks/export")
@@ -334,3 +336,90 @@ def test_postgres_flow_and_case_insensitive_email_unique(
     body = tasks_response.json()
     assert body["meta"]["count"] == 1
     assert body["items"][0]["comment_count"] == 1
+
+
+def test_get_task_returns_404_for_unknown_id(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет отдельный сценарий 404 для чтения одной задачи"""
+
+    client = TestClient(create_app())
+
+    response = client.get("/tasks/999999")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "task_not_found"
+
+
+def test_assign_task_moves_todo_to_in_progress(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет контракт назначения исполнителя со сменой статуса"""
+
+    client = TestClient(create_app())
+    author_id = _create_user(
+        client, username="sergey", email="sergey@example.com"
+    )
+    assignee_id = _create_user(
+        client, username="irina", email="irina@example.com"
+    )
+
+    create_response = client.post(
+        "/tasks",
+        json={
+            "title": "Назначить исполнителя",
+            "description": "После назначения задача должна стартовать",
+            "author_id": author_id,
+            "status": "todo",
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    assign_response = client.post(
+        f"/tasks/{task_id}/assign",
+        json={"assignee_id": assignee_id},
+    )
+
+    assert assign_response.status_code == 200
+    assert assign_response.json()["assignee_id"] == assignee_id
+    assert assign_response.json()["status"] == "in_progress"
+
+
+def test_close_task_changes_status_and_rejects_second_close(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет отдельную ручку закрытия задачи"""
+
+    client = TestClient(create_app())
+    author_id = _create_user(
+        client, username="nina", email="nina@example.com"
+    )
+
+    create_response = client.post(
+        "/tasks",
+        json={
+            "title": "Закрыть задачу",
+            "description": "Проверить контракт close",
+            "author_id": author_id,
+            "status": "in_progress",
+        },
+    )
+    assert create_response.status_code == 201
+    task_id = create_response.json()["id"]
+
+    close_response = client.post(
+        f"/tasks/{task_id}/close",
+        json={"changed_by_user_id": author_id},
+    )
+
+    assert close_response.status_code == 200
+    assert close_response.json()["status"] == "done"
+
+    second_close = client.post(
+        f"/tasks/{task_id}/close",
+        json={"changed_by_user_id": author_id},
+    )
+
+    assert second_close.status_code == 409
+    assert second_close.json()["error"]["code"] == "task_conflict"

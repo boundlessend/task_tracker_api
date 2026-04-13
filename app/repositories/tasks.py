@@ -372,27 +372,149 @@ class TaskRepository:
         return task
 
     def assign_task(self, task_id: int, assignee_id: int) -> TaskRead:
-        """назначает исполнителя задаче"""
+        """назначает исполнителя задаче и переводит todo в in_progress"""
 
-        self.get_task(task_id)
+        existing = (
+            self.session.execute(
+                text(
+                    """
+                    SELECT assignee_id, status
+                    FROM tasks
+                    WHERE id = :task_id
+                    """
+                ),
+                {"task_id": task_id},
+            )
+            .mappings()
+            .first()
+        )
+        if existing is None:
+            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+
+        new_status = (
+            TaskStatus.IN_PROGRESS.value
+            if existing["status"] == TaskStatus.TODO.value
+            else existing["status"]
+        )
+        if (
+            existing["assignee_id"] == assignee_id
+            and existing["status"] == new_status
+        ):
+            return self.get_task(task_id)
+
         try:
             self.session.execute(
                 text(
                     """
                     UPDATE tasks
                     SET assignee_id = :assignee_id,
+                        status = :status,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = :task_id
                     """
                 ),
-                {"task_id": task_id, "assignee_id": assignee_id},
+                {
+                    "task_id": task_id,
+                    "assignee_id": assignee_id,
+                    "status": new_status,
+                },
             )
+            if existing["status"] != new_status:
+                self.session.execute(
+                    text(
+                        """
+                        INSERT INTO task_history (
+                            task_id,
+                            changed_by_user_id,
+                            action,
+                            old_status,
+                            new_status
+                        )
+                        VALUES (
+                            :task_id,
+                            :changed_by_user_id,
+                            'status_changed',
+                            :old_status,
+                            :new_status
+                        )
+                        """
+                    ),
+                    {
+                        "task_id": task_id,
+                        "changed_by_user_id": assignee_id,
+                        "old_status": existing["status"],
+                        "new_status": new_status,
+                    },
+                )
             task = self.get_task(task_id)
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
                 "Не удалось назначить исполнителя. Проверьте assignee_id."
+            ) from exc
+        return task
+
+    def close_task(self, task_id: int, changed_by_user_id: int) -> TaskRead:
+        """закрывает задачу переводом в done"""
+
+        existing = (
+            self.session.execute(
+                text("SELECT status FROM tasks WHERE id = :task_id"),
+                {"task_id": task_id},
+            )
+            .mappings()
+            .first()
+        )
+        if existing is None:
+            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+        if existing["status"] == TaskStatus.DONE.value:
+            raise TaskConflictError("Задача уже закрыта.")
+
+        try:
+            self.session.execute(
+                text(
+                    """
+                    UPDATE tasks
+                    SET status = :status,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :task_id
+                    """
+                ),
+                {"task_id": task_id, "status": TaskStatus.DONE.value},
+            )
+            self.session.execute(
+                text(
+                    """
+                    INSERT INTO task_history (
+                        task_id,
+                        changed_by_user_id,
+                        action,
+                        old_status,
+                        new_status
+                    )
+                    VALUES (
+                        :task_id,
+                        :changed_by_user_id,
+                        'status_changed',
+                        :old_status,
+                        :new_status
+                    )
+                    """
+                ),
+                {
+                    "task_id": task_id,
+                    "changed_by_user_id": changed_by_user_id,
+                    "old_status": existing["status"],
+                    "new_status": TaskStatus.DONE.value,
+                },
+            )
+            task = self.get_task(task_id)
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise DataIntegrityError(
+                "Не удалось закрыть задачу. Проверьте changed_by_user_id."
             ) from exc
         return task
 

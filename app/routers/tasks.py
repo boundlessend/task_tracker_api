@@ -10,6 +10,7 @@ from app.schemas.comments import CommentCreate, CommentRead, TaskCommentCreate
 from app.schemas.tasks import (
     SortOrder,
     TaskAssign,
+    TaskClose,
     TaskCreate,
     TaskListResponse,
     TaskRead,
@@ -197,8 +198,20 @@ def assign_task(
     """назначает исполнителя задаче"""
 
     return service.assign_task(
-        task_id=task_id, assignee_id=payload.assignee_id
+        task_id=task_id,
+        assignee_id=payload.assignee_id,
     )
+
+
+@router.post("/{task_id}/close", response_model=TaskRead)
+def close_task(
+    task_id: int,
+    payload: TaskClose,
+    service: TaskServiceDep,
+) -> TaskRead:
+    """закрывает задачу"""
+
+    return service.close_task(task_id=task_id, payload=payload)
 
 
 @router.post(

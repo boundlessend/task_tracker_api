@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.repositories.tasks import TaskRepository
 from app.schemas.tasks import (
     SortOrder,
+    TaskClose,
     TaskCreate,
     TaskListResponse,
     TaskRead,
@@ -100,6 +101,14 @@ class TaskService:
         return self.repository.assign_task(
             task_id=task_id,
             assignee_id=assignee_id,
+        )
+
+    def close_task(self, task_id: int, payload: TaskClose) -> TaskRead:
+        """закрывает задачу"""
+
+        return self.repository.close_task(
+            task_id=task_id,
+            changed_by_user_id=payload.changed_by_user_id,
         )
 
     def archive_task(self, task_id: int) -> TaskRead:

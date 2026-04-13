@@ -67,6 +67,14 @@ class TaskAssign(BaseModel):
     assignee_id: int = Field(gt=0)
 
 
+class TaskClose(BaseModel):
+    """данные для закрытия задачи"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    changed_by_user_id: int = Field(gt=0)
+
+
 class TaskStatusUpdate(BaseModel):
     """данные для изменения статуса задачи"""
 
