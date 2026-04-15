@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class UserCreate(BaseModel):
     """данные для создания пользователя"""
 
+    model_config = ConfigDict(extra="forbid")
+
     username: str = Field(min_length=3, max_length=64)
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=255)

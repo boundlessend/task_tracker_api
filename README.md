@@ -1,4 +1,4 @@
-# Task Tracker API
+# task tracker api
 
 ## установка
 
@@ -16,7 +16,7 @@ cp .env.example .env.dev
 python -m app
 ```
 
-Swagger UI:
+swagger ui:
 
 ```text
 http://127.0.0.1:8000/docs
@@ -86,19 +86,19 @@ make format-check
 make lint
 ```
 
-Запустить тесты:
+запустить тесты:
 
 ```bash
 make test
 ```
 
-Запустить все проверки:
+запустить все проверки:
 
 ```bash
 make check
 ```
 
-Остановить docker compose:
+остановить docker compose:
 
 ```bash
 make down
@@ -109,11 +109,9 @@ make down
 создать задачу:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "title": "Подготовить api note",
-    "description": "Согласовать контракт",
+curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'   -d '{
+    "title": "подготовить api note",
+    "description": "согласовать контракт",
     "author_id": 1,
     "assignee_id": 2,
     "status": "todo"
@@ -129,10 +127,8 @@ curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=2&sort_by=updated_at&s
 обновить задачу:
 
 ```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/12 \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "title": "Подготовить краткий api note",
+curl -X PATCH http://127.0.0.1:8000/tasks/12   -H 'Content-Type: application/json'   -d '{
+    "title": "подготовить краткий api note",
     "description": null
   }'
 ```
@@ -140,9 +136,7 @@ curl -X PATCH http://127.0.0.1:8000/tasks/12 \
 назначить исполнителя:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/assign \
-  -H 'Content-Type: application/json' \
-  -d '{
+curl -X POST http://127.0.0.1:8000/tasks/12/assign   -H 'Content-Type: application/json'   -d '{
     "assignee_id": 2
   }'
 ```
@@ -150,11 +144,9 @@ curl -X POST http://127.0.0.1:8000/tasks/12/assign \
 добавить комментарий:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/comments \
-  -H 'Content-Type: application/json' \
-  -d '{
+curl -X POST http://127.0.0.1:8000/tasks/12/comments   -H 'Content-Type: application/json'   -d '{
     "author_id": 1,
-    "text": "Первый комментарий"
+    "text": "первый комментарий"
   }'
 ```
 
@@ -164,7 +156,7 @@ curl -X POST http://127.0.0.1:8000/tasks/12/comments \
 curl http://127.0.0.1:8000/tasks/summary
 ```
 
-выгрузить CSV:
+выгрузить csv:
 
 ```bash
 curl -OJ http://127.0.0.1:8000/tasks/export

@@ -31,12 +31,12 @@ class SortOrder(str, Enum):
 class TaskCreate(BaseModel):
     """данные для создания задачи"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    author_id: int = Field(gt=0)
-    assignee_id: int | None = Field(default=None, gt=0)
+    author_id: int = Field(strict=True, gt=0)
+    assignee_id: int | None = Field(default=None, strict=True, gt=0)
     status: TaskStatus = TaskStatus.TODO
     due_date: datetime | None = None
 
@@ -44,16 +44,20 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     """данные для частичного обновления задачи"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     due_date: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_nullable_fields(self) -> "TaskUpdate":
-        """проверяет поля которые нельзя передавать как null"""
+    def validate_payload(self) -> "TaskUpdate":
+        """проверяет ограничения частичного обновления"""
 
+        if not self.model_fields_set:
+            raise ValueError(
+                "Нужно передать хотя бы одно поле для обновления."
+            )
         if "title" in self.model_fields_set and self.title is None:
             raise ValueError("Поле title не может быть null.")
         return self
@@ -64,7 +68,7 @@ class TaskAssign(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    assignee_id: int = Field(gt=0)
+    assignee_id: int = Field(strict=True, gt=0)
 
 
 class TaskClose(BaseModel):
@@ -72,7 +76,7 @@ class TaskClose(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    changed_by_user_id: int = Field(gt=0)
+    changed_by_user_id: int = Field(strict=True, gt=0)
 
 
 class TaskStatusUpdate(BaseModel):
@@ -81,7 +85,7 @@ class TaskStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: TaskStatus
-    changed_by_user_id: int = Field(gt=0)
+    changed_by_user_id: int = Field(strict=True, gt=0)
 
 
 class TaskRead(BaseModel):

@@ -5,7 +5,7 @@ class AppError(RuntimeError):
     """базовая ошибка приложения"""
 
     status_code = 400
-    code = "app_error"
+    error_code = "app_error"
 
     def __init__(self, message: str, details: object | None = None) -> None:
         """сохраняет сообщение и детали ошибки"""
@@ -18,7 +18,7 @@ class AppError(RuntimeError):
 class AppConfigurationError(AppError):
     """ошибка конфигурации приложения"""
 
-    code = "app_configuration_error"
+    error_code = "app_configuration_error"
 
 
 class TaskTrackerError(AppError):
@@ -29,17 +29,23 @@ class TaskNotFoundError(TaskTrackerError):
     """задача не найдена"""
 
     status_code = 404
-    code = "task_not_found"
+    error_code = "task_not_found"
 
 
 class DataIntegrityError(TaskTrackerError):
     """нарушение ограничений данных"""
 
-    code = "data_integrity_error"
+    error_code = "data_integrity_error"
 
 
 class TaskConflictError(TaskTrackerError):
     """конфликт состояния задачи"""
 
     status_code = 409
-    code = "task_conflict"
+    error_code = "task_conflict"
+
+
+class TaskAlreadyClosedError(TaskConflictError):
+    """задача уже закрыта"""
+
+    error_code = "task_already_closed"

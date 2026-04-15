@@ -67,9 +67,7 @@ def test_task_contract_endpoints_work_together(
     """проверяет новые ручки задач и форму ответов"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
-        client, username="ivan", email="ivan@example.com"
-    )
+    author_id = _create_user(client, username="ivan", email="ivan@example.com")
     assignee_id = _create_user(
         client, username="anna", email="anna@example.com"
     )
@@ -172,21 +170,21 @@ def test_task_contract_endpoints_work_together(
 
     second_archive = client.post(f"/tasks/{task_id}/archive")
     assert second_archive.status_code == 409
-    assert second_archive.json()["error"]["code"] == "task_conflict"
+    assert second_archive.json()["error_code"] == "task_conflict"
 
     forbidden_patch = client.patch(
         f"/tasks/{task_id}",
         json={"status": "done"},
     )
     assert forbidden_patch.status_code == 422
-    assert forbidden_patch.json()["error"]["code"] == "validation_error"
+    assert forbidden_patch.json()["error_code"] == "validation_error"
 
     null_title_patch = client.patch(
         f"/tasks/{task_id}",
         json={"title": None},
     )
     assert null_title_patch.status_code == 422
-    assert null_title_patch.json()["error"]["code"] == "validation_error"
+    assert null_title_patch.json()["error_code"] == "validation_error"
 
 
 def test_task_history_is_written_for_create_status_and_comment(
@@ -224,7 +222,10 @@ def test_task_history_is_written_for_create_status_and_comment(
 
     change_status = client.patch(
         f"/tasks/{task_id}/status",
-        json={"status": "in_progress", "changed_by_user_id": assignee_id},
+        json={
+            "status": "in_progress",
+            "changed_by_user_id": assignee_id,
+        },
     )
     assert change_status.status_code == 200
 
@@ -301,7 +302,7 @@ def test_postgres_flow_and_case_insensitive_email_unique(
         },
     )
     assert duplicate_email.status_code == 400
-    assert duplicate_email.json()["error"]["code"] == "data_integrity_error"
+    assert duplicate_email.json()["error_code"] == "data_integrity_error"
 
     task_response = client.post(
         "/tasks",
@@ -348,7 +349,31 @@ def test_get_task_returns_404_for_unknown_id(
     response = client.get("/tasks/999999")
 
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "task_not_found"
+    assert response.json() == {
+        "error_code": "task_not_found",
+        "message": "Задача с id=999999 не найдена.",
+        "details": {"task_id": 999999},
+    }
+
+
+def test_update_task_returns_404_for_unknown_id(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет единый 404 для изменения отсутствующей задачи"""
+
+    client = TestClient(create_app())
+
+    response = client.patch(
+        "/tasks/999999",
+        json={"title": "обновить несуществующую задачу"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error_code": "task_not_found",
+        "message": "Задача с id=999999 не найдена.",
+        "details": {"task_id": 999999},
+    }
 
 
 def test_assign_task_moves_todo_to_in_progress(
@@ -392,9 +417,7 @@ def test_close_task_changes_status_and_rejects_second_close(
     """проверяет отдельную ручку закрытия задачи"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
-        client, username="nina", email="nina@example.com"
-    )
+    author_id = _create_user(client, username="nina", email="nina@example.com")
 
     create_response = client.post(
         "/tasks",
@@ -422,4 +445,123 @@ def test_close_task_changes_status_and_rejects_second_close(
     )
 
     assert second_close.status_code == 409
-    assert second_close.json()["error"]["code"] == "task_conflict"
+    assert second_close.json() == {
+        "error_code": "task_already_closed",
+        "message": "Задача уже закрыта.",
+        "details": {"task_id": task_id, "status": "done"},
+    }
+
+
+def test_task_create_rejects_extra_fields(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет запрет лишних полей при создании задачи"""
+
+    client = TestClient(create_app())
+    author_id = _create_user(
+        client, username="extra", email="extra@example.com"
+    )
+
+    response = client.post(
+        "/tasks",
+        json={
+            "title": "лишнее поле",
+            "author_id": author_id,
+            "unexpected": True,
+        },
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "validation_error"
+    assert body["details"][0]["location"] == ["body", "unexpected"]
+
+
+def test_task_update_rejects_extra_fields(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет запрет лишних полей при обновлении задачи"""
+
+    client = TestClient(create_app())
+    author_id = _create_user(
+        client, username="patcher", email="patcher@example.com"
+    )
+    task_id = client.post(
+        "/tasks",
+        json={
+            "title": "обновляемая задача",
+            "author_id": author_id,
+        },
+    ).json()["id"]
+
+    response = client.patch(
+        f"/tasks/{task_id}",
+        json={"unexpected": "value"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "validation_error"
+    assert body["details"][0]["location"] == ["body", "unexpected"]
+
+
+def test_task_update_requires_at_least_one_field(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет transport validation для пустого patch"""
+
+    client = TestClient(create_app())
+    author_id = _create_user(
+        client, username="empty", email="empty@example.com"
+    )
+    task_id = client.post(
+        "/tasks",
+        json={
+            "title": "пустой patch",
+            "author_id": author_id,
+        },
+    ).json()["id"]
+
+    response = client.patch(f"/tasks/{task_id}", json={})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "validation_error"
+    assert body["details"][0]["location"] == ["body"]
+
+
+def test_list_tasks_validates_limit_and_offset(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет границы параметров пагинации"""
+
+    client = TestClient(create_app())
+
+    response = client.get("/tasks", params={"limit": 0, "offset": -1})
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error_code"] == "validation_error"
+    assert {tuple(detail["location"]) for detail in body["details"]} == {
+        ("query", "limit"),
+        ("query", "offset"),
+    }
+
+
+def test_create_task_handles_malformed_json(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет единый ответ на некорректный json"""
+
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/tasks",
+        data='{"title": "broken",',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["error_code"] == "malformed_json"
+    assert body["details"][0]["location"][0] == "body"

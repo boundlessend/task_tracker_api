@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.exceptions.errors import (
     DataIntegrityError,
+    TaskAlreadyClosedError,
     TaskConflictError,
     TaskNotFoundError,
 )
@@ -60,6 +61,15 @@ class TaskRepository:
 
         self.session = session
 
+    @staticmethod
+    def _build_task_not_found_error(task_id: int) -> TaskNotFoundError:
+        """собирает доменную ошибку отсутствующей задачи"""
+
+        return TaskNotFoundError(
+            f"Задача с id={task_id} не найдена.",
+            details={"task_id": task_id},
+        )
+
     def _fetch_one_task(
         self, where_sql: str, params: dict[str, object]
     ) -> TaskRead:
@@ -68,9 +78,7 @@ class TaskRepository:
         query = text(f"""{TASK_SELECT_SQL}\n{where_sql}""")
         row = self.session.execute(query, params).mappings().first()
         if row is None:
-            raise TaskNotFoundError(
-                f"Задача с id={params['task_id']} не найдена."
-            )
+            raise self._build_task_not_found_error(int(params["task_id"]))
         return TaskRead.model_validate(row)
 
     def _fetch_many_tasks(
@@ -179,7 +187,8 @@ class TaskRepository:
             self.session.rollback()
             raise DataIntegrityError(
                 "Не удалось создать задачу. "
-                "Проверьте author_id, assignee_id и ограничения полей."
+                "Проверьте author_id, assignee_id и ограничения полей.",
+                details={"entity": "task", "operation": "create"},
             ) from exc
         return task
 
@@ -367,7 +376,12 @@ class TaskRepository:
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось обновить задачу. Проверьте ограничения полей."
+                "Не удалось обновить задачу. Проверьте ограничения полей.",
+                details={
+                    "entity": "task",
+                    "operation": "update",
+                    "task_id": task_id,
+                },
             ) from exc
         return task
 
@@ -389,7 +403,7 @@ class TaskRepository:
             .first()
         )
         if existing is None:
-            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+            raise self._build_task_not_found_error(task_id)
 
         new_status = (
             TaskStatus.IN_PROGRESS.value
@@ -451,7 +465,12 @@ class TaskRepository:
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось назначить исполнителя. Проверьте assignee_id."
+                "Не удалось назначить исполнителя. Проверьте assignee_id.",
+                details={
+                    "entity": "task",
+                    "operation": "assign",
+                    "task_id": task_id,
+                },
             ) from exc
         return task
 
@@ -467,9 +486,12 @@ class TaskRepository:
             .first()
         )
         if existing is None:
-            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+            raise self._build_task_not_found_error(task_id)
         if existing["status"] == TaskStatus.DONE.value:
-            raise TaskConflictError("Задача уже закрыта.")
+            raise TaskAlreadyClosedError(
+                "Задача уже закрыта.",
+                details={"task_id": task_id, "status": TaskStatus.DONE.value},
+            )
 
         try:
             self.session.execute(
@@ -514,7 +536,12 @@ class TaskRepository:
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось закрыть задачу. Проверьте changed_by_user_id."
+                "Не удалось закрыть задачу. Проверьте changed_by_user_id.",
+                details={
+                    "entity": "task",
+                    "operation": "close",
+                    "task_id": task_id,
+                },
             ) from exc
         return task
 
@@ -530,9 +557,12 @@ class TaskRepository:
             .first()
         )
         if existing is None:
-            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+            raise self._build_task_not_found_error(task_id)
         if existing["archived_at"] is not None:
-            raise TaskConflictError("Задача уже находится в архиве.")
+            raise TaskConflictError(
+                "Задача уже находится в архиве.",
+                details={"task_id": task_id, "status": "archived"},
+            )
 
         self.session.execute(
             text(
@@ -566,7 +596,7 @@ class TaskRepository:
             .first()
         )
         if existing is None:
-            raise TaskNotFoundError(f"Задача с id={task_id} не найдена.")
+            raise self._build_task_not_found_error(task_id)
 
         old_status = existing["status"]
         try:
@@ -612,6 +642,11 @@ class TaskRepository:
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось изменить статус задачи. Проверьте changed_by_user_id."
+                "Не удалось изменить статус задачи. Проверьте changed_by_user_id.",
+                details={
+                    "entity": "task",
+                    "operation": "update_status",
+                    "task_id": task_id,
+                },
             ) from exc
         return task
