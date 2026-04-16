@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 from io import StringIO
+from uuid import UUID
 
 from fastapi import APIRouter, Query, Response
 
@@ -12,6 +13,7 @@ from app.schemas.tasks import (
     TaskAssign,
     TaskClose,
     TaskCreate,
+    TaskListItemRead,
     TaskListResponse,
     TaskRead,
     TaskSortField,
@@ -25,7 +27,7 @@ from app.schemas.tasks import (
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-def _render_tasks_csv(tasks: list[TaskRead]) -> str:
+def _render_tasks_csv(tasks: list[TaskListItemRead]) -> str:
     """собирает csv с задачами"""
 
     buffer = StringIO()
@@ -36,12 +38,15 @@ def _render_tasks_csv(tasks: list[TaskRead]) -> str:
             "title",
             "description",
             "status",
-            "author_id",
-            "author_username",
+            "owner_id",
+            "owner_username",
+            "owner_full_name",
             "assignee_id",
             "assignee_username",
+            "assignee_full_name",
             "due_date",
             "archived_at",
+            "closed_at",
             "created_at",
             "updated_at",
             "comment_count",
@@ -50,16 +55,19 @@ def _render_tasks_csv(tasks: list[TaskRead]) -> str:
     for task in tasks:
         writer.writerow(
             [
-                task.id,
+                str(task.id),
                 task.title,
                 task.description,
                 task.status.value,
-                task.author_id,
-                task.author_username,
-                task.assignee_id,
-                task.assignee_username,
+                str(task.owner_id),
+                task.owner.username,
+                task.owner.full_name,
+                str(task.assignee_id) if task.assignee_id else None,
+                task.assignee.username if task.assignee else None,
+                task.assignee.full_name if task.assignee else None,
                 task.due_date.isoformat() if task.due_date else None,
                 task.archived_at.isoformat() if task.archived_at else None,
+                task.closed_at.isoformat() if task.closed_at else None,
                 task.created_at.isoformat(),
                 task.updated_at.isoformat(),
                 task.comment_count,
@@ -72,8 +80,8 @@ def _render_tasks_csv(tasks: list[TaskRead]) -> str:
 def list_tasks(
     service: TaskServiceDep,
     status: TaskStatus | None = Query(default=None),
-    author_id: int | None = Query(default=None, gt=0),
-    assignee_id: int | None = Query(default=None, gt=0),
+    owner_id: UUID | None = Query(default=None),
+    assignee_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     sort_by: TaskSortField = Query(default=TaskSortField.UPDATED_AT),
@@ -83,7 +91,7 @@ def list_tasks(
 
     return service.list_tasks(
         status=status,
-        author_id=author_id,
+        owner_id=owner_id,
         assignee_id=assignee_id,
         limit=limit,
         offset=offset,
@@ -92,12 +100,12 @@ def list_tasks(
     )
 
 
-@router.get("/search", response_model=list[TaskRead])
+@router.get("/search", response_model=list[TaskListItemRead])
 def search_tasks(
     service: TaskServiceDep,
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
-) -> list[TaskRead]:
+) -> list[TaskListItemRead]:
     """ищет задачи по тексту"""
 
     return service.search_tasks(query_text=q, limit=limit)
@@ -125,8 +133,8 @@ def get_summary_by_status(
 def export_tasks(
     service: TaskServiceDep,
     status: TaskStatus | None = Query(default=None),
-    author_id: int | None = Query(default=None, gt=0),
-    assignee_id: int | None = Query(default=None, gt=0),
+    owner_id: UUID | None = Query(default=None),
+    assignee_id: UUID | None = Query(default=None),
     sort_by: TaskSortField = Query(default=TaskSortField.UPDATED_AT),
     sort_order: SortOrder = Query(default=SortOrder.DESC),
 ) -> Response:
@@ -134,7 +142,7 @@ def export_tasks(
 
     tasks = service.export_tasks(
         status=status,
-        author_id=author_id,
+        owner_id=owner_id,
         assignee_id=assignee_id,
         sort_by=sort_by,
         sort_order=sort_order,
@@ -148,7 +156,7 @@ def export_tasks(
 
 @router.get("/{task_id}", response_model=TaskRead)
 def get_task(
-    task_id: int,
+    task_id: UUID,
     service: TaskServiceDep,
 ) -> TaskRead:
     """возвращает задачу по идентификатору"""
@@ -158,7 +166,7 @@ def get_task(
 
 @router.get("/{task_id}/comments", response_model=list[CommentRead])
 def list_task_comments(
-    task_id: int,
+    task_id: UUID,
     task_service: TaskServiceDep,
     comment_service: CommentServiceDep,
 ) -> list[CommentRead]:
@@ -180,7 +188,7 @@ def create_task(
 
 @router.patch("/{task_id}", response_model=TaskRead)
 def update_task(
-    task_id: int,
+    task_id: UUID,
     payload: TaskUpdate,
     service: TaskServiceDep,
 ) -> TaskRead:
@@ -191,7 +199,7 @@ def update_task(
 
 @router.post("/{task_id}/assign", response_model=TaskRead)
 def assign_task(
-    task_id: int,
+    task_id: UUID,
     payload: TaskAssign,
     service: TaskServiceDep,
 ) -> TaskRead:
@@ -205,7 +213,7 @@ def assign_task(
 
 @router.post("/{task_id}/close", response_model=TaskRead)
 def close_task(
-    task_id: int,
+    task_id: UUID,
     payload: TaskClose,
     service: TaskServiceDep,
 ) -> TaskRead:
@@ -218,7 +226,7 @@ def close_task(
     "/{task_id}/comments", response_model=CommentRead, status_code=201
 )
 def create_task_comment(
-    task_id: int,
+    task_id: UUID,
     payload: TaskCommentCreate,
     task_service: TaskServiceDep,
     comment_service: CommentServiceDep,
@@ -237,7 +245,7 @@ def create_task_comment(
 
 @router.post("/{task_id}/archive", response_model=TaskRead)
 def archive_task(
-    task_id: int,
+    task_id: UUID,
     service: TaskServiceDep,
 ) -> TaskRead:
     """архивирует задачу"""
@@ -247,7 +255,7 @@ def archive_task(
 
 @router.patch("/{task_id}/status", response_model=TaskRead)
 def update_task_status(
-    task_id: int,
+    task_id: UUID,
     payload: TaskStatusUpdate,
     service: TaskServiceDep,
 ) -> TaskRead:

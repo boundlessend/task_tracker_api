@@ -32,6 +32,20 @@ class TaskNotFoundError(TaskTrackerError):
     error_code = "task_not_found"
 
 
+class CommentNotFoundError(TaskTrackerError):
+    """комментарий не найден"""
+
+    status_code = 404
+    error_code = "comment_not_found"
+
+
+class UserNotFoundError(TaskTrackerError):
+    """пользователь не найден"""
+
+    status_code = 404
+    error_code = "user_not_found"
+
+
 class DataIntegrityError(TaskTrackerError):
     """нарушение ограничений данных"""
 

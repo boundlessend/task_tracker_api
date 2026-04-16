@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from uuid import UUID
 
+from sqlalchemy import Select, func, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, joinedload, selectinload
+
+from app.core.time import from_storage_datetime, now_msk, to_storage_datetime
+from app.db.models import Comment, Task, TaskHistory, User
 from app.exceptions.errors import (
     DataIntegrityError,
     TaskAlreadyClosedError,
     TaskConflictError,
     TaskNotFoundError,
+    UserNotFoundError,
 )
+from app.schemas.comments import CommentRead
+from app.schemas.task_history import TaskHistoryRead
 from app.schemas.tasks import (
     SortOrder,
     TaskCreate,
+    TaskListItemRead,
     TaskListMeta,
     TaskListResponse,
     TaskRead,
@@ -23,38 +31,9 @@ from app.schemas.tasks import (
     TaskUpdate,
 )
 
-TASK_SELECT_SQL = """
-SELECT
-    t.id,
-    t.title,
-    t.description,
-    t.status,
-    t.author_id,
-    t.assignee_id,
-    author_user.username AS author_username,
-    assignee_user.username AS assignee_username,
-    t.due_date,
-    t.archived_at,
-    t.created_at,
-    t.updated_at,
-    (
-        SELECT COUNT(*)
-        FROM comments comment_source
-        WHERE comment_source.task_id = t.id
-    ) AS comment_count
-FROM tasks t
-JOIN users author_user ON author_user.id = t.author_id
-LEFT JOIN users assignee_user ON assignee_user.id = t.assignee_id
-"""
-
-SORT_COLUMN_MAP = {
-    TaskSortField.CREATED_AT: "t.created_at",
-    TaskSortField.UPDATED_AT: "t.updated_at",
-}
-
 
 class TaskRepository:
-    """работает с задачами через явные sql-запросы"""
+    """работает с задачами через sqlalchemy"""
 
     def __init__(self, session: Session) -> None:
         """сохраняет сессию базы данных"""
@@ -62,185 +41,277 @@ class TaskRepository:
         self.session = session
 
     @staticmethod
-    def _build_task_not_found_error(task_id: int) -> TaskNotFoundError:
+    def _build_task_not_found_error(task_id: UUID) -> TaskNotFoundError:
         """собирает доменную ошибку отсутствующей задачи"""
 
         return TaskNotFoundError(
             f"Задача с id={task_id} не найдена.",
-            details={"task_id": task_id},
+            details={"task_id": str(task_id)},
         )
 
-    def _fetch_one_task(
-        self, where_sql: str, params: dict[str, object]
-    ) -> TaskRead:
-        """читает одну задачу по условию"""
+    def _ensure_user_exists(self, user_id: UUID, field_name: str) -> None:
+        """проверяет что пользователь существует"""
 
-        query = text(f"""{TASK_SELECT_SQL}\n{where_sql}""")
-        row = self.session.execute(query, params).mappings().first()
-        if row is None:
-            raise self._build_task_not_found_error(int(params["task_id"]))
-        return TaskRead.model_validate(row)
+        if self.session.get(User, user_id) is None:
+            raise UserNotFoundError(
+                (
+                    f"Пользователь для поля {field_name} "
+                    f"с id={user_id} не найден."
+                ),
+                details={"field": field_name, "user_id": str(user_id)},
+            )
 
-    def _fetch_many_tasks(
-        self,
-        *,
-        where_sql: str = "",
-        order_sql: str,
-        params: dict[str, object],
-    ) -> list[TaskRead]:
-        """читает список задач по условию и сортировке"""
+    @staticmethod
+    def _map_comment(comment: Comment) -> CommentRead:
+        """преобразует orm-модель комментария в схему"""
 
-        query = text(
-            f"""
-            {TASK_SELECT_SQL}
-            {where_sql}
-            ORDER BY {order_sql}
-            """
+        return CommentRead.model_validate(
+            {
+                "id": comment.id,
+                "task_id": comment.task_id,
+                "author_id": comment.author_id,
+                "text": comment.text,
+                "created_at": from_storage_datetime(comment.created_at),
+                "updated_at": from_storage_datetime(comment.updated_at),
+                "author": {
+                    "id": comment.author.id,
+                    "username": comment.author.username,
+                    "full_name": comment.author.full_name,
+                },
+            }
         )
-        rows = self.session.execute(query, params).mappings().all()
-        return [TaskRead.model_validate(row) for row in rows]
 
+    @staticmethod
+    def _map_history_entry(entry: TaskHistory) -> TaskHistoryRead:
+        """преобразует orm-модель истории в схему"""
+
+        return TaskHistoryRead.model_validate(
+            {
+                "id": entry.id,
+                "task_id": entry.task_id,
+                "changed_by_user_id": entry.changed_by_user_id,
+                "action": entry.action,
+                "old_status": entry.old_status,
+                "new_status": entry.new_status,
+                "comment_text": entry.comment_text,
+                "created_at": from_storage_datetime(entry.created_at),
+                "changed_by": {
+                    "id": entry.changed_by.id,
+                    "username": entry.changed_by.username,
+                    "full_name": entry.changed_by.full_name,
+                },
+            }
+        )
+
+    @staticmethod
+    def _map_task_list_item(
+        task: Task,
+        comment_count: int,
+    ) -> TaskListItemRead:
+        """преобразует orm-модель задачи в схему списка"""
+
+        return TaskListItemRead.model_validate(
+            {
+                "id": task.id,
+                "title": task.title,
+                "description": task.description,
+                "status": task.status,
+                "owner_id": task.owner_id,
+                "assignee_id": task.assignee_id,
+                "due_date": from_storage_datetime(task.due_date),
+                "archived_at": from_storage_datetime(task.archived_at),
+                "created_at": from_storage_datetime(task.created_at),
+                "updated_at": from_storage_datetime(task.updated_at),
+                "closed_at": from_storage_datetime(task.closed_at),
+                "comment_count": comment_count,
+                "owner": {
+                    "id": task.owner.id,
+                    "username": task.owner.username,
+                    "full_name": task.owner.full_name,
+                },
+                "assignee": (
+                    {
+                        "id": task.assignee.id,
+                        "username": task.assignee.username,
+                        "full_name": task.assignee.full_name,
+                    }
+                    if task.assignee is not None
+                    else None
+                ),
+            }
+        )
+
+    def _map_task_read(self, task: Task) -> TaskRead:
+        """преобразует orm-модель задачи в детальную схему"""
+
+        list_item = self._map_task_list_item(task, len(task.comments))
+        return TaskRead.model_validate(
+            {
+                **list_item.model_dump(),
+                "comments": [
+                    self._map_comment(comment).model_dump()
+                    for comment in task.comments
+                ],
+                "history": [
+                    self._map_history_entry(entry).model_dump()
+                    for entry in task.history
+                ],
+            }
+        )
+
+    @staticmethod
+    def _sort_expression(sort_by: TaskSortField, sort_order: SortOrder):
+        """строит выражение сортировки"""
+
+        column = getattr(Task, sort_by.value)
+        if sort_order == SortOrder.ASC:
+            return column.asc(), Task.id.asc()
+        return column.desc(), Task.id.desc()
+
+    @staticmethod
     def _build_filters(
-        self,
         *,
         status: TaskStatus | None = None,
-        author_id: int | None = None,
-        assignee_id: int | None = None,
-    ) -> tuple[str, dict[str, object]]:
-        """собирает where для фильтров списка задач"""
+        owner_id: UUID | None = None,
+        assignee_id: UUID | None = None,
+    ) -> list[object]:
+        """собирает фильтры списка задач"""
 
-        where_clauses: list[str] = []
-        params: dict[str, object] = {}
-
+        filters: list[object] = []
         if status is not None:
-            where_clauses.append("t.status = :status")
-            params["status"] = status.value
-        if author_id is not None:
-            where_clauses.append("t.author_id = :author_id")
-            params["author_id"] = author_id
+            filters.append(Task.status == status.value)
+        if owner_id is not None:
+            filters.append(Task.owner_id == owner_id)
         if assignee_id is not None:
-            where_clauses.append("t.assignee_id = :assignee_id")
-            params["assignee_id"] = assignee_id
+            filters.append(Task.assignee_id == assignee_id)
+        return filters
 
-        if not where_clauses:
-            return "", params
-        return "WHERE " + " AND ".join(where_clauses), params
+    def _task_list_query(
+        self,
+        filters: list[object],
+    ) -> Select[tuple[Task, int]]:
+        """строит базовый запрос списка задач"""
+
+        comment_count_subquery = (
+            select(
+                Comment.task_id.label("task_id"),
+                func.count(Comment.id).label("comment_count"),
+            )
+            .group_by(Comment.task_id)
+            .subquery()
+        )
+        return (
+            select(
+                Task,
+                func.coalesce(comment_count_subquery.c.comment_count, 0),
+            )
+            .outerjoin(
+                comment_count_subquery,
+                comment_count_subquery.c.task_id == Task.id,
+            )
+            .options(selectinload(Task.owner), selectinload(Task.assignee))
+            .where(*filters)
+        )
+
+    def _get_task_model(self, task_id: UUID) -> Task:
+        """возвращает orm-модель задачи с зависимостями"""
+
+        task = self.session.scalar(
+            select(Task)
+            .where(Task.id == task_id)
+            .options(
+                joinedload(Task.owner),
+                joinedload(Task.assignee),
+                selectinload(Task.comments).joinedload(Comment.author),
+                selectinload(Task.history).joinedload(TaskHistory.changed_by),
+            )
+        )
+        if task is None:
+            raise self._build_task_not_found_error(task_id)
+        return task
 
     def create_task(self, payload: TaskCreate) -> TaskRead:
-        """создает задачу и пишет запись в историю"""
+        """создает задачу и запись в истории"""
 
-        insert_task = text(
-            """
-            INSERT INTO tasks (
-                title,
-                description,
-                status,
-                author_id,
-                assignee_id,
-                due_date
-            )
-            VALUES (
-                :title,
-                :description,
-                :status,
-                :author_id,
-                :assignee_id,
-                :due_date
-            )
-            RETURNING id
-            """
+        self._ensure_user_exists(payload.owner_id, "owner_id")
+        if payload.assignee_id is not None:
+            self._ensure_user_exists(payload.assignee_id, "assignee_id")
+
+        task = Task(
+            title=payload.title,
+            description=payload.description,
+            owner_id=payload.owner_id,
+            assignee_id=payload.assignee_id,
+            status=payload.status.value,
+            due_date=to_storage_datetime(payload.due_date),
+            closed_at=(
+                to_storage_datetime(now_msk())
+                if payload.status == TaskStatus.DONE
+                else None
+            ),
         )
-        insert_history = text(
-            """
-            INSERT INTO task_history (
-                task_id,
-                changed_by_user_id,
-                action,
-                new_status
-            )
-            VALUES (:task_id, :changed_by_user_id, 'created', :new_status)
-            """
+        history_entry = TaskHistory(
+            task=task,
+            changed_by_user_id=payload.owner_id,
+            action="created",
+            new_status=payload.status.value,
         )
+        self.session.add(task)
+        self.session.add(history_entry)
         try:
-            task_row = (
-                self.session.execute(
-                    insert_task,
-                    {
-                        **payload.model_dump(),
-                        "status": payload.status.value,
-                    },
-                )
-                .mappings()
-                .one()
-            )
-            self.session.execute(
-                insert_history,
-                {
-                    "task_id": task_row["id"],
-                    "changed_by_user_id": payload.author_id,
-                    "new_status": payload.status.value,
-                },
-            )
-            task = self.get_task(task_row["id"])
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
                 "Не удалось создать задачу. "
-                "Проверьте author_id, assignee_id и ограничения полей.",
+                "Проверьте owner_id, assignee_id и ограничения полей.",
                 details={"entity": "task", "operation": "create"},
             ) from exc
-        return task
+        return self.get_task(task.id)
 
-    def get_task(self, task_id: int) -> TaskRead:
+    def get_task(self, task_id: UUID) -> TaskRead:
         """возвращает задачу по идентификатору"""
 
-        return self._fetch_one_task(
-            "WHERE t.id = :task_id",
-            {"task_id": task_id},
-        )
+        return self._map_task_read(self._get_task_model(task_id))
 
     def list_tasks(
         self,
         *,
         status: TaskStatus | None = None,
-        author_id: int | None = None,
-        assignee_id: int | None = None,
+        owner_id: UUID | None = None,
+        assignee_id: UUID | None = None,
         limit: int = 50,
         offset: int = 0,
         sort_by: TaskSortField = TaskSortField.UPDATED_AT,
         sort_order: SortOrder = SortOrder.DESC,
     ) -> TaskListResponse:
-        """читает список задач с фильтрами и сортировкой"""
+        """возвращает список задач с пагинацией"""
 
-        where_sql, params = self._build_filters(
+        filters = self._build_filters(
             status=status,
-            author_id=author_id,
+            owner_id=owner_id,
             assignee_id=assignee_id,
         )
-        params.update({"limit": limit, "offset": offset})
-        order_sql = (
-            f"{SORT_COLUMN_MAP[sort_by]} {sort_order.value.upper()}, t.id DESC"
+        total = self.session.scalar(
+            select(func.count()).select_from(Task).where(*filters)
         )
-        order_sql += "\nLIMIT :limit\nOFFSET :offset"
-
-        items = self._fetch_many_tasks(
-            where_sql=where_sql,
-            order_sql=order_sql,
-            params=params,
-        )
-        total = self.count_tasks(
-            status=status,
-            author_id=author_id,
-            assignee_id=assignee_id,
-        )
+        rows = self.session.execute(
+            self._task_list_query(filters)
+            .order_by(*self._sort_expression(sort_by, sort_order))
+            .offset(offset)
+            .limit(limit)
+        ).all()
+        items = [
+            self._map_task_list_item(task, int(comment_count))
+            for task, comment_count in rows
+        ]
         return TaskListResponse(
             items=items,
             meta=TaskListMeta(
                 limit=limit,
                 offset=offset,
                 count=len(items),
-                total=total,
+                total=int(total or 0),
             ),
         )
 
@@ -248,290 +319,187 @@ class TaskRepository:
         self,
         *,
         status: TaskStatus | None = None,
-        author_id: int | None = None,
-        assignee_id: int | None = None,
+        owner_id: UUID | None = None,
+        assignee_id: UUID | None = None,
         sort_by: TaskSortField = TaskSortField.UPDATED_AT,
         sort_order: SortOrder = SortOrder.DESC,
-    ) -> list[TaskRead]:
+    ) -> list[TaskListItemRead]:
         """возвращает все задачи для выгрузки"""
 
-        where_sql, params = self._build_filters(
+        filters = self._build_filters(
             status=status,
-            author_id=author_id,
+            owner_id=owner_id,
             assignee_id=assignee_id,
         )
-        order_sql = (
-            f"{SORT_COLUMN_MAP[sort_by]} {sort_order.value.upper()}, t.id DESC"
-        )
-        return self._fetch_many_tasks(
-            where_sql=where_sql,
-            order_sql=order_sql,
-            params=params,
-        )
-
-    def count_tasks(
-        self,
-        *,
-        status: TaskStatus | None = None,
-        author_id: int | None = None,
-        assignee_id: int | None = None,
-    ) -> int:
-        """считает количество задач по фильтрам"""
-
-        where_sql, params = self._build_filters(
-            status=status,
-            author_id=author_id,
-            assignee_id=assignee_id,
-        )
-        row = (
-            self.session.execute(
-                text(f"SELECT COUNT(*) AS total FROM tasks t {where_sql}"),
-                params,
+        rows = self.session.execute(
+            self._task_list_query(filters).order_by(
+                *self._sort_expression(sort_by, sort_order)
             )
-            .mappings()
-            .one()
-        )
-        return int(row["total"])
+        ).all()
+        return [
+            self._map_task_list_item(task, int(comment_count))
+            for task, comment_count in rows
+        ]
 
-    def search_tasks(self, query_text: str, limit: int = 20) -> list[TaskRead]:
+    def search_tasks(
+        self,
+        query_text: str,
+        limit: int = 20,
+    ) -> list[TaskListItemRead]:
         """ищет задачи по заголовку и описанию"""
 
-        return self._fetch_many_tasks(
-            where_sql=(
-                "WHERE lower(t.title) LIKE lower(:pattern) "
-                "OR lower(COALESCE(t.description, '')) LIKE lower(:pattern)"
-            ),
-            order_sql="t.updated_at DESC, t.id DESC\nLIMIT :limit",
-            params={"pattern": f"%{query_text}%", "limit": limit},
-        )
+        pattern = f"%{query_text.lower()}%"
+        rows = self.session.execute(
+            self._task_list_query(
+                [
+                    or_(
+                        func.lower(Task.title).like(pattern),
+                        func.lower(func.coalesce(Task.description, "")).like(
+                            pattern
+                        ),
+                    )
+                ]
+            )
+            .order_by(Task.updated_at.desc(), Task.id.desc())
+            .limit(limit)
+        ).all()
+        return [
+            self._map_task_list_item(task, int(comment_count))
+            for task, comment_count in rows
+        ]
 
     def get_summary(self) -> TaskSummaryRead:
         """возвращает сводку по задачам"""
 
-        total_row = (
-            self.session.execute(text("SELECT COUNT(*) AS total FROM tasks"))
-            .mappings()
-            .one()
-        )
-        archived_row = (
-            self.session.execute(
-                text(
-                    "SELECT COUNT(*) AS archived FROM tasks "
-                    "WHERE archived_at IS NOT NULL"
-                )
-            )
-            .mappings()
-            .one()
+        total = self.session.scalar(select(func.count()).select_from(Task))
+        archived = self.session.scalar(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.archived_at.is_not(None))
         )
         return TaskSummaryRead(
-            total=int(total_row["total"]),
-            archived=int(archived_row["archived"]),
+            total=int(total or 0),
+            archived=int(archived or 0),
             by_status=self.get_summary_by_status(),
         )
 
     def get_summary_by_status(self) -> list[TaskSummaryByStatus]:
         """считает сводку задач по статусам"""
 
-        query = text(
-            """
-            SELECT status, COUNT(*) AS task_count
-            FROM tasks
-            GROUP BY status
-            ORDER BY status ASC
-            """
-        )
-        rows = self.session.execute(query).mappings().all()
-        return [TaskSummaryByStatus.model_validate(row) for row in rows]
+        rows = self.session.execute(
+            select(Task.status, func.count(Task.id))
+            .group_by(Task.status)
+            .order_by(Task.status.asc())
+        ).all()
+        return [
+            TaskSummaryByStatus(status=status, task_count=int(task_count))
+            for status, task_count in rows
+        ]
 
-    def update_task(self, task_id: int, payload: TaskUpdate) -> TaskRead:
+    def update_task(self, task_id: UUID, payload: TaskUpdate) -> TaskRead:
         """частично обновляет задачу"""
 
-        self.get_task(task_id)
+        task = self._get_task_model(task_id)
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
-            return self.get_task(task_id)
+            return self._map_task_read(task)
 
-        set_clauses = []
-        params: dict[str, object] = {"task_id": task_id}
-        for field_name, value in updates.items():
-            set_clauses.append(f"{field_name} = :{field_name}")
-            params[field_name] = value
-        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+        if "title" in updates:
+            task.title = updates["title"]
+        if "description" in updates:
+            task.description = updates["description"]
+        if "due_date" in updates:
+            task.due_date = to_storage_datetime(updates["due_date"])
+        task.updated_at = to_storage_datetime(now_msk())
 
         try:
-            self.session.execute(
-                text(
-                    """
-                    UPDATE tasks
-                    SET {set_clause}
-                    WHERE id = :task_id
-                    """.format(
-                        set_clause=", ".join(set_clauses)
-                    )
-                ),
-                params,
-            )
-            task = self.get_task(task_id)
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось обновить задачу. Проверьте ограничения полей.",
+                "Не удалось обновить задачу. " "Проверьте ограничения полей.",
                 details={
                     "entity": "task",
                     "operation": "update",
-                    "task_id": task_id,
+                    "task_id": str(task_id),
                 },
             ) from exc
-        return task
+        return self.get_task(task_id)
 
-    def assign_task(self, task_id: int, assignee_id: int) -> TaskRead:
+    def assign_task(self, task_id: UUID, assignee_id: UUID) -> TaskRead:
         """назначает исполнителя задаче и переводит todo в in_progress"""
 
-        existing = (
-            self.session.execute(
-                text(
-                    """
-                    SELECT assignee_id, status
-                    FROM tasks
-                    WHERE id = :task_id
-                    """
-                ),
-                {"task_id": task_id},
-            )
-            .mappings()
-            .first()
-        )
-        if existing is None:
-            raise self._build_task_not_found_error(task_id)
+        self._ensure_user_exists(assignee_id, "assignee_id")
+        task = self._get_task_model(task_id)
 
         new_status = (
             TaskStatus.IN_PROGRESS.value
-            if existing["status"] == TaskStatus.TODO.value
-            else existing["status"]
+            if task.status == TaskStatus.TODO.value
+            else task.status
         )
-        if (
-            existing["assignee_id"] == assignee_id
-            and existing["status"] == new_status
-        ):
-            return self.get_task(task_id)
+        if task.assignee_id == assignee_id and task.status == new_status:
+            return self._map_task_read(task)
+
+        old_status = task.status
+        task.assignee_id = assignee_id
+        task.status = new_status
+        task.updated_at = to_storage_datetime(now_msk())
+
+        if old_status != new_status:
+            self.session.add(
+                TaskHistory(
+                    task_id=task.id,
+                    changed_by_user_id=assignee_id,
+                    action="status_changed",
+                    old_status=old_status,
+                    new_status=new_status,
+                )
+            )
 
         try:
-            self.session.execute(
-                text(
-                    """
-                    UPDATE tasks
-                    SET assignee_id = :assignee_id,
-                        status = :status,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :task_id
-                    """
-                ),
-                {
-                    "task_id": task_id,
-                    "assignee_id": assignee_id,
-                    "status": new_status,
-                },
-            )
-            if existing["status"] != new_status:
-                self.session.execute(
-                    text(
-                        """
-                        INSERT INTO task_history (
-                            task_id,
-                            changed_by_user_id,
-                            action,
-                            old_status,
-                            new_status
-                        )
-                        VALUES (
-                            :task_id,
-                            :changed_by_user_id,
-                            'status_changed',
-                            :old_status,
-                            :new_status
-                        )
-                        """
-                    ),
-                    {
-                        "task_id": task_id,
-                        "changed_by_user_id": assignee_id,
-                        "old_status": existing["status"],
-                        "new_status": new_status,
-                    },
-                )
-            task = self.get_task(task_id)
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось назначить исполнителя. Проверьте assignee_id.",
+                "Не удалось назначить исполнителя. " "Проверьте assignee_id.",
                 details={
                     "entity": "task",
                     "operation": "assign",
-                    "task_id": task_id,
+                    "task_id": str(task_id),
                 },
             ) from exc
-        return task
+        return self.get_task(task_id)
 
-    def close_task(self, task_id: int, changed_by_user_id: int) -> TaskRead:
+    def close_task(self, task_id: UUID, changed_by_user_id: UUID) -> TaskRead:
         """закрывает задачу переводом в done"""
 
-        existing = (
-            self.session.execute(
-                text("SELECT status FROM tasks WHERE id = :task_id"),
-                {"task_id": task_id},
-            )
-            .mappings()
-            .first()
-        )
-        if existing is None:
-            raise self._build_task_not_found_error(task_id)
-        if existing["status"] == TaskStatus.DONE.value:
+        self._ensure_user_exists(changed_by_user_id, "changed_by_user_id")
+        task = self._get_task_model(task_id)
+        if task.status == TaskStatus.DONE.value:
             raise TaskAlreadyClosedError(
                 "Задача уже закрыта.",
-                details={"task_id": task_id, "status": TaskStatus.DONE.value},
-            )
-
-        try:
-            self.session.execute(
-                text(
-                    """
-                    UPDATE tasks
-                    SET status = :status,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :task_id
-                    """
-                ),
-                {"task_id": task_id, "status": TaskStatus.DONE.value},
-            )
-            self.session.execute(
-                text(
-                    """
-                    INSERT INTO task_history (
-                        task_id,
-                        changed_by_user_id,
-                        action,
-                        old_status,
-                        new_status
-                    )
-                    VALUES (
-                        :task_id,
-                        :changed_by_user_id,
-                        'status_changed',
-                        :old_status,
-                        :new_status
-                    )
-                    """
-                ),
-                {
-                    "task_id": task_id,
-                    "changed_by_user_id": changed_by_user_id,
-                    "old_status": existing["status"],
-                    "new_status": TaskStatus.DONE.value,
+                details={
+                    "task_id": str(task_id),
+                    "status": TaskStatus.DONE.value,
                 },
             )
-            task = self.get_task(task_id)
+
+        old_status = task.status
+        closed_at = to_storage_datetime(now_msk())
+        task.status = TaskStatus.DONE.value
+        task.closed_at = closed_at
+        task.updated_at = closed_at
+        self.session.add(
+            TaskHistory(
+                task_id=task.id,
+                changed_by_user_id=changed_by_user_id,
+                action="status_changed",
+                old_status=old_status,
+                new_status=TaskStatus.DONE.value,
+            )
+        )
+
+        try:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
@@ -540,113 +508,67 @@ class TaskRepository:
                 details={
                     "entity": "task",
                     "operation": "close",
-                    "task_id": task_id,
+                    "task_id": str(task_id),
                 },
             ) from exc
-        return task
+        return self.get_task(task_id)
 
-    def archive_task(self, task_id: int) -> TaskRead:
+    def archive_task(self, task_id: UUID) -> TaskRead:
         """архивирует задачу"""
 
-        existing = (
-            self.session.execute(
-                text("SELECT archived_at FROM tasks WHERE id = :task_id"),
-                {"task_id": task_id},
-            )
-            .mappings()
-            .first()
-        )
-        if existing is None:
-            raise self._build_task_not_found_error(task_id)
-        if existing["archived_at"] is not None:
+        task = self._get_task_model(task_id)
+        if task.archived_at is not None:
             raise TaskConflictError(
                 "Задача уже находится в архиве.",
-                details={"task_id": task_id, "status": "archived"},
+                details={"task_id": str(task_id), "status": "archived"},
             )
 
-        self.session.execute(
-            text(
-                """
-                UPDATE tasks
-                SET archived_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = :task_id
-                """
-            ),
-            {"task_id": task_id},
-        )
-        task = self.get_task(task_id)
+        archived_at = to_storage_datetime(now_msk())
+        task.archived_at = archived_at
+        task.updated_at = archived_at
         self.session.commit()
-        return task
+        return self.get_task(task_id)
 
     def update_task_status(
         self,
-        task_id: int,
+        task_id: UUID,
         status: TaskStatus,
-        changed_by_user_id: int,
+        changed_by_user_id: UUID,
     ) -> TaskRead:
         """обновляет статус задачи и пишет запись в историю"""
 
-        existing = (
-            self.session.execute(
-                text("SELECT status FROM tasks WHERE id = :task_id"),
-                {"task_id": task_id},
-            )
-            .mappings()
-            .first()
-        )
-        if existing is None:
-            raise self._build_task_not_found_error(task_id)
+        self._ensure_user_exists(changed_by_user_id, "changed_by_user_id")
+        task = self._get_task_model(task_id)
 
-        old_status = existing["status"]
+        old_status = task.status
+        task.status = status.value
+        current_time = to_storage_datetime(now_msk())
+        if status == TaskStatus.DONE:
+            task.closed_at = task.closed_at or current_time
+        else:
+            task.closed_at = None
+        task.updated_at = current_time
+        self.session.add(
+            TaskHistory(
+                task_id=task.id,
+                changed_by_user_id=changed_by_user_id,
+                action="status_changed",
+                old_status=old_status,
+                new_status=status.value,
+            )
+        )
+
         try:
-            self.session.execute(
-                text(
-                    """
-                    UPDATE tasks
-                    SET status = :status,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :task_id
-                    """
-                ),
-                {"task_id": task_id, "status": status.value},
-            )
-            self.session.execute(
-                text(
-                    """
-                    INSERT INTO task_history (
-                        task_id,
-                        changed_by_user_id,
-                        action,
-                        old_status,
-                        new_status
-                    )
-                    VALUES (
-                        :task_id,
-                        :changed_by_user_id,
-                        'status_changed',
-                        :old_status,
-                        :new_status
-                    )
-                    """
-                ),
-                {
-                    "task_id": task_id,
-                    "changed_by_user_id": changed_by_user_id,
-                    "old_status": old_status,
-                    "new_status": status.value,
-                },
-            )
-            task = self.get_task(task_id)
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise DataIntegrityError(
-                "Не удалось изменить статус задачи. Проверьте changed_by_user_id.",
+                "Не удалось изменить статус задачи. "
+                "Проверьте changed_by_user_id.",
                 details={
                     "entity": "task",
                     "operation": "update_status",
-                    "task_id": task_id,
+                    "task_id": str(task_id),
                 },
             ) from exc
-        return task
+        return self.get_task(task_id)

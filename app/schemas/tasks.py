@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.comments import CommentRead
+from app.schemas.task_history import TaskHistoryRead
+from app.schemas.users import UserRefRead
 
 
 class TaskStatus(str, Enum):
@@ -31,12 +36,25 @@ class SortOrder(str, Enum):
 class TaskCreate(BaseModel):
     """данные для создания задачи"""
 
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        json_schema_extra={
+            "example": {
+                "title": "Подготовить api note",
+                "description": "Согласовать контракт ручек",
+                "owner_id": "11111111-1111-4111-8111-111111111111",
+                "assignee_id": "22222222-2222-4222-8222-222222222222",
+                "status": "todo",
+                "due_date": "2026-04-20T12:00:00+03:00",
+            }
+        },
+    )
 
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    author_id: int = Field(strict=True, gt=0)
-    assignee_id: int | None = Field(default=None, strict=True, gt=0)
+    owner_id: UUID
+    assignee_id: UUID | None = None
     status: TaskStatus = TaskStatus.TODO
     due_date: datetime | None = None
 
@@ -68,7 +86,7 @@ class TaskAssign(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    assignee_id: int = Field(strict=True, gt=0)
+    assignee_id: UUID
 
 
 class TaskClose(BaseModel):
@@ -76,7 +94,7 @@ class TaskClose(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    changed_by_user_id: int = Field(strict=True, gt=0)
+    changed_by_user_id: UUID
 
 
 class TaskStatusUpdate(BaseModel):
@@ -85,27 +103,35 @@ class TaskStatusUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: TaskStatus
-    changed_by_user_id: int = Field(strict=True, gt=0)
+    changed_by_user_id: UUID
 
 
-class TaskRead(BaseModel):
-    """данные задачи из базы"""
+class TaskListItemRead(BaseModel):
+    """данные задачи для списков и поиска"""
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     title: str
     description: str | None = None
     status: TaskStatus
-    author_id: int
-    assignee_id: int | None = None
-    author_username: str
-    assignee_username: str | None = None
+    owner_id: UUID
+    assignee_id: UUID | None = None
     due_date: datetime | None = None
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    closed_at: datetime | None = None
     comment_count: int = 0
+    owner: UserRefRead
+    assignee: UserRefRead | None = None
+
+
+class TaskRead(TaskListItemRead):
+    """полные данные задачи со связанными сущностями"""
+
+    comments: list[CommentRead] = Field(default_factory=list)
+    history: list[TaskHistoryRead] = Field(default_factory=list)
 
 
 class TaskListMeta(BaseModel):
@@ -120,7 +146,7 @@ class TaskListMeta(BaseModel):
 class TaskListResponse(BaseModel):
     """ответ со списком задач"""
 
-    items: list[TaskRead]
+    items: list[TaskListItemRead]
     meta: TaskListMeta
 
 

@@ -1,112 +1,38 @@
 # api note
 
+## что изменилось
+
+- задача использует связи `owner` и `assignee`
+- комментарий является отдельной сущностью и хранит явную связь с автором
+- чтение одной задачи возвращает связанные данные: владельца, исполнителя, комментарии и историю
+- у задачи есть системные поля `created_at`, `updated_at`, `closed_at`
+- для задач и комментариев используются раздельные модели создания, обновления и чтения
+
 ## формат ошибок
 
-все бизнес-ошибки и ошибки валидации возвращаются в одном формате:
+все бизнес-ошибки и ошибки валидации возвращаются в едином формате:
 
 ```json
 {
-  "error": {
-    "code": "validation_error",
-    "message": "Запрос не прошел валидацию.",
-    "details": [
-      {
-        "loc": ["body", "title"],
-        "message": "Поле title не может быть null.",
-        "type": "value_error"
-      }
-    ]
-  }
+  "error_code": "validation_error",
+  "message": "запрос не прошел валидацию",
+  "details": [
+    {
+      "location": ["body", "title"],
+      "message": "поле обязательно",
+      "error_type": "missing"
+    }
+  ]
 }
 ```
 
 основные коды ошибок:
-- `validation_error` — запрос не прошел валидацию
-- `task_not_found` — задача не найдена
-- `task_conflict` — конфликт состояния задачи
-- `data_integrity_error` — нарушены ограничения данных
-
----
-
-## `GET /tasks`
-
-возвращает список задач в согласованной форме
-
-### query params
-
-- `status`: `todo | in_progress | done`
-- `author_id`: `integer > 0`
-- `assignee_id`: `integer > 0`
-- `limit`: `integer`, по умолчанию `50`, диапазон `1..100`
-- `offset`: `integer >= 0`, по умолчанию `0`
-- `sort_by`: `created_at | updated_at`, по умолчанию `updated_at`
-- `sort_order`: `asc | desc`, по умолчанию `desc`
-
-### response `200 OK`
-
-```json
-{
-  "items": [
-    {
-      "id": 12,
-      "title": "Подготовить api note",
-      "description": "Согласовать контракт",
-      "status": "todo",
-      "author_id": 1,
-      "assignee_id": 2,
-      "author_username": "ivan",
-      "assignee_username": "anna",
-      "due_date": null,
-      "archived_at": null,
-      "created_at": "2026-04-03T10:00:00",
-      "updated_at": "2026-04-03T10:05:00",
-      "comment_count": 1
-    }
-  ],
-  "meta": {
-    "limit": 50,
-    "offset": 0,
-    "count": 1,
-    "total": 1
-  }
-}
-```
-
-### status codes
-
-- `200 OK`
-- `422 Unprocessable Entity`
-
----
-
-## `GET /tasks/{task_id}`
-
-возвращает одну задачу
-
-### response `200 OK`
-
-```json
-{
-  "id": 12,
-  "title": "Подготовить api note",
-  "description": "Согласовать контракт",
-  "status": "todo",
-  "author_id": 1,
-  "assignee_id": 2,
-  "author_username": "ivan",
-  "assignee_username": "anna",
-  "due_date": null,
-  "archived_at": null,
-  "created_at": "2026-04-03T10:00:00",
-  "updated_at": "2026-04-03T10:05:00",
-  "comment_count": 1
-}
-```
-
-### status codes
-
-- `200 OK`
-- `404 Not Found`
+- `validation_error`
+- `task_not_found`
+- `comment_not_found`
+- `task_conflict`
+- `task_already_closed`
+- `data_integrity_error`
 
 ---
 
@@ -120,8 +46,8 @@
 {
   "title": "Подготовить api note",
   "description": "Согласовать контракт",
-  "author_id": 1,
-  "assignee_id": 2,
+  "owner_id": "11111111-1111-4111-8111-111111111111",
+  "assignee_id": "22222222-2222-4222-8222-222222222222",
   "status": "todo",
   "due_date": null
 }
@@ -129,13 +55,131 @@
 
 ### response `201 Created`
 
-возвращается полная задача в той же схеме, что и в `GET /tasks/{task_id}`
+возвращает полную задачу со связанными сущностями
 
-### status codes
+---
 
-- `201 Created`
-- `400 Bad Request`
-- `422 Unprocessable Entity`
+## `GET /tasks`
+
+возвращает список задач
+
+все datetime-поля сериализуются в московском времени `+03:00`
+
+### query params
+
+- `status`: `todo | in_progress | done`
+- `owner_id`: `uuid`
+- `assignee_id`: `uuid`
+- `limit`: `1..100`
+- `offset`: `integer >= 0`
+- `sort_by`: `created_at | updated_at`
+- `sort_order`: `asc | desc`
+
+### response `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "title": "Подготовить api note",
+      "description": "Согласовать контракт",
+      "status": "todo",
+      "owner_id": "11111111-1111-4111-8111-111111111111",
+      "assignee_id": "22222222-2222-4222-8222-222222222222",
+      "due_date": null,
+      "archived_at": null,
+      "created_at": "2026-04-03T10:00:00+03:00",
+      "updated_at": "2026-04-03T10:05:00+03:00",
+      "closed_at": null,
+      "comment_count": 1,
+      "owner": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "username": "ivan",
+        "full_name": "Ivan Ivanov"
+      },
+      "assignee": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "username": "anna",
+        "full_name": "Anna Smirnova"
+      }
+    }
+  ],
+  "meta": {
+    "limit": 50,
+    "offset": 0,
+    "count": 1,
+    "total": 1
+  }
+}
+```
+
+---
+
+## `GET /tasks/{task_id}`
+
+возвращает одну задачу со связанными данными
+
+### response `200 OK`
+
+```json
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "title": "Подготовить api note",
+  "description": "Согласовать контракт",
+  "status": "in_progress",
+  "owner_id": "11111111-1111-4111-8111-111111111111",
+  "assignee_id": "22222222-2222-4222-8222-222222222222",
+  "due_date": null,
+  "archived_at": null,
+  "created_at": "2026-04-03T10:00:00+03:00",
+  "updated_at": "2026-04-03T10:05:00+03:00",
+  "closed_at": null,
+  "comment_count": 1,
+  "owner": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "username": "ivan",
+    "full_name": "Ivan Ivanov"
+  },
+  "assignee": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "username": "anna",
+    "full_name": "Anna Smirnova"
+  },
+  "comments": [
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "task_id": "33333333-3333-4333-8333-333333333333",
+      "author_id": "11111111-1111-4111-8111-111111111111",
+      "text": "Первый комментарий",
+      "created_at": "2026-04-03T10:06:00+03:00",
+      "updated_at": "2026-04-03T10:06:00+03:00",
+      "author": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "username": "ivan",
+        "full_name": "Ivan Ivanov"
+      }
+    }
+  ],
+  "history": [
+    {
+      "id": "55555555-5555-4555-8555-555555555555",
+      "task_id": "33333333-3333-4333-8333-333333333333",
+      "changed_by_user_id": "11111111-1111-4111-8111-111111111111",
+      "action": "created",
+      "old_status": null,
+      "new_status": "todo",
+      "comment_text": null,
+      "created_at": "2026-04-03T10:00:00+03:00",
+      "changed_by": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "username": "ivan",
+        "full_name": "Ivan Ivanov"
+      }
+    }
+  ]
+}
+```
 
 ---
 
@@ -143,41 +187,25 @@
 
 частично обновляет задачу
 
-### request body
-
-разрешено менять только:
+можно менять только:
 - `title`
 - `description`
 - `due_date`
 
-пример:
-
-```json
-{
-  "title": "Подготовить краткий api note",
-  "description": null,
-  "due_date": null
-}
-```
-
-### точные правила `PATCH`
-
-- если поле **не передано**, оно **не меняется**
-- если `description` передан как `null`, поле **очищается**
-- если `due_date` передан как `null`, поле **очищается**
-- `title = null` недопустим и приводит к `422`
-- менять нельзя: `id`, `author_id`, `assignee_id`, `status`, `archived_at`, `created_at`, `updated_at`, `comment_count`, `author_username`, `assignee_username`
-- если в body передано запрещенное поле, запрос считается невалидным и возвращает `422`
-
-### response `200 OK`
-
-возвращается полная задача в той же схеме, что и в `GET /tasks/{task_id}`
-
-### status codes
-
-- `200 OK`
-- `404 Not Found`
-- `422 Unprocessable Entity`
+нельзя менять:
+- `id`
+- `owner_id`
+- `assignee_id`
+- `status`
+- `archived_at`
+- `created_at`
+- `updated_at`
+- `closed_at`
+- `comment_count`
+- `owner`
+- `assignee`
+- `comments`
+- `history`
 
 ---
 
@@ -185,58 +213,28 @@
 
 назначает исполнителя задаче
 
-### request body
-
-```json
-{
-  "assignee_id": 2
-}
-```
-
-### контракт
-
-- поле `assignee_id` всегда обновляется
-- если задача была в статусе `todo`, после назначения она переходит в `in_progress`
-- если задача уже была в `in_progress` или `done`, статус сохраняется
-
-### response `200 OK`
-
-возвращается полная задача в обновленном виде
-
-### status codes
-
-- `200 OK`
-- `400 Bad Request`
-- `404 Not Found`
-- `422 Unprocessable Entity`
+- обновляет `assignee_id`
+- если задача была в `todo`, переводит ее в `in_progress`
 
 ---
 
 ## `POST /tasks/{task_id}/close`
 
-закрывает задачу отдельной ручкой
+закрывает задачу
 
-### request body
+- переводит задачу в `done`
+- заполняет `closed_at`
+- повторное закрытие возвращает `409`
 
-```json
-{
-  "changed_by_user_id": 2
-}
-```
+---
 
-### контракт
+## `PATCH /tasks/{task_id}/status`
 
-- ручка переводит задачу в статус `done`
-- если задача уже в статусе `done`, возвращается `409 Conflict`
-- в ответе возвращается полная задача в обновленном виде
+меняет статус задачи
 
-### status codes
-
-- `200 OK`
-- `400 Bad Request`
-- `404 Not Found`
-- `409 Conflict`
-- `422 Unprocessable Entity`
+- при переводе в `done` заполняет `closed_at`
+- при возврате из `done` в другой статус очищает `closed_at`
+- пишет запись в `TaskHistory`
 
 ---
 
@@ -248,7 +246,7 @@
 
 ```json
 {
-  "author_id": 1,
+  "author_id": "11111111-1111-4111-8111-111111111111",
   "text": "Первый комментарий"
 }
 ```
@@ -257,185 +255,40 @@
 
 ```json
 {
-  "id": 7,
-  "task_id": 12,
-  "author_id": 1,
-  "author_username": "ivan",
+  "id": "44444444-4444-4444-8444-444444444444",
+  "task_id": "33333333-3333-4333-8333-333333333333",
+  "author_id": "11111111-1111-4111-8111-111111111111",
   "text": "Первый комментарий",
-  "created_at": "2026-04-03T10:10:00"
+  "created_at": "2026-04-03T10:06:00+03:00",
+  "updated_at": "2026-04-03T10:06:00+03:00",
+  "author": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "username": "ivan",
+    "full_name": "Ivan Ivanov"
+  }
 }
 ```
 
-### status codes
-
-- `201 Created`
-- `400 Bad Request`
-- `404 Not Found`
-- `422 Unprocessable Entity`
-
 ---
 
-## `GET /tasks/{task_id}/comments`
+## `PATCH /comments/{comment_id}`
 
-возвращает комментарии задачи
-
-### response `200 OK`
-
-```json
-[
-  {
-    "id": 7,
-    "task_id": 12,
-    "author_id": 1,
-    "author_username": "ivan",
-    "text": "Первый комментарий",
-    "created_at": "2026-04-03T10:10:00"
-  }
-]
-```
-
-### status codes
-
-- `200 OK`
-- `404 Not Found`
-
----
-
-## `POST /tasks/{task_id}/archive`
-
-архивирует задачу
+частично обновляет комментарий
 
 ### request body
 
-тело запроса не требуется
-
-### response `200 OK`
-
-возвращается полная задача, где `archived_at` заполнен
-
-### status codes
-
-- `200 OK`
-- `404 Not Found`
-- `409 Conflict` — задача уже в архиве
-
----
-
-## `GET /tasks/summary`
-
-возвращает краткую сводку по задачам
-
-### response `200 OK`
-
 ```json
 {
-  "total": 3,
-  "archived": 1,
-  "by_status": [
-    {
-      "status": "done",
-      "task_count": 1
-    },
-    {
-      "status": "in_progress",
-      "task_count": 1
-    },
-    {
-      "status": "todo",
-      "task_count": 1
-    }
-  ]
+  "text": "Обновленный комментарий"
 }
 ```
-
-### status codes
-
-- `200 OK`
 
 ---
 
 ## `GET /tasks/export`
 
-выгружает задачи в CSV
-
-### query params
-
-поддерживает те же фильтры и сортировку, что и `GET /tasks`, кроме `limit` и `offset`
-
-### response `200 OK`
-
-- `Content-Type: text/csv; charset=utf-8`
-- `Content-Disposition: attachment; filename="tasks.csv"`
-
-csv-колонки:
+выгружает csv со столбцами:
 
 ```text
-id,title,description,status,author_id,author_username,assignee_id,assignee_username,due_date,archived_at,created_at,updated_at,comment_count
-```
-
-### status codes
-
-- `200 OK`
-- `422 Unprocessable Entity`
-
----
-
-## короткие примеры запросов
-
-### создать задачу
-
-```bash
-curl -X POST http://127.0.0.1:8000/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "title": "Подготовить api note",
-    "description": "Согласовать контракт",
-    "author_id": 1,
-    "assignee_id": 2,
-    "status": "todo"
-  }'
-```
-
-### получить список задач
-
-```bash
-curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=2&sort_by=updated_at&sort_order=desc'
-```
-
-### обновить задачу
-
-```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/12 \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "title": "Подготовить краткий api note",
-    "description": null
-  }'
-```
-
-### назначить исполнителя
-
-```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/assign \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "assignee_id": 2
-  }'
-```
-
-### добавить комментарий
-
-```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/comments \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "author_id": 1,
-    "text": "Первый комментарий"
-  }'
-```
-
-### архивировать задачу
-
-```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/archive
+id,title,description,status,owner_id,owner_username,owner_full_name,assignee_id,assignee_username,assignee_full_name,due_date,archived_at,closed_at,created_at,updated_at,comment_count
 ```

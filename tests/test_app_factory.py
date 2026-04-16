@@ -59,7 +59,7 @@ def test_create_app_uses_passed_settings_for_database(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    """проверяет что create_app(settings=...) реально переключает базу данных"""
+    """проверяет что create_app(settings=...) переключает базу данных"""
 
     first_db_url = migrate_sqlite_db(monkeypatch, tmp_path, name="first")
     second_db_url = migrate_sqlite_db(monkeypatch, tmp_path, name="second")
@@ -82,7 +82,7 @@ def test_create_app_uses_passed_settings_for_database(
     first_client = TestClient(first_app)
     second_client = TestClient(second_app)
 
-    author_id = create_user(
+    owner_id = create_user(
         first_client,
         username="maria",
         email="maria@example.com",
@@ -92,7 +92,7 @@ def test_create_app_uses_passed_settings_for_database(
         json={
             "title": "Изолированная задача",
             "description": "Должна остаться только в первой базе",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "status": "todo",
         },
     )

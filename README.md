@@ -112,8 +112,8 @@ make down
 curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'   -d '{
     "title": "подготовить api note",
     "description": "согласовать контракт",
-    "author_id": 1,
-    "assignee_id": 2,
+    "owner_id": "11111111-1111-4111-8111-111111111111",
+    "assignee_id": "22222222-2222-4222-8222-222222222222",
     "status": "todo"
   }'
 ```
@@ -121,13 +121,13 @@ curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'  
 получить список задач:
 
 ```bash
-curl 'http://127.0.0.1:8000/tasks?status=todo&assignee_id=2&sort_by=updated_at&sort_order=desc'
+curl 'http://127.0.0.1:8000/tasks?status=todo&owner_id=11111111-1111-4111-8111-111111111111&assignee_id=22222222-2222-4222-8222-222222222222&sort_by=updated_at&sort_order=desc'
 ```
 
 обновить задачу:
 
 ```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/12   -H 'Content-Type: application/json'   -d '{
+curl -X PATCH http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333   -H 'Content-Type: application/json'   -d '{
     "title": "подготовить краткий api note",
     "description": null
   }'
@@ -136,16 +136,16 @@ curl -X PATCH http://127.0.0.1:8000/tasks/12   -H 'Content-Type: application/jso
 назначить исполнителя:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/assign   -H 'Content-Type: application/json'   -d '{
-    "assignee_id": 2
+curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/assign   -H 'Content-Type: application/json'   -d '{
+    "assignee_id": "22222222-2222-4222-8222-222222222222"
   }'
 ```
 
 добавить комментарий:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/12/comments   -H 'Content-Type: application/json'   -d '{
-    "author_id": 1,
+curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/comments   -H 'Content-Type: application/json'   -d '{
+    "author_id": "11111111-1111-4111-8111-111111111111",
     "text": "первый комментарий"
   }'
 ```
@@ -161,3 +161,8 @@ curl http://127.0.0.1:8000/tasks/summary
 ```bash
 curl -OJ http://127.0.0.1:8000/tasks/export
 ```
+
+
+## быстрый старт в swagger
+
+создай хотя бы одного пользователя через `POST /users`, а уже потом передавай его `id` в формате UUID в `owner_id`, `assignee_id` и `author_id`. Все системные даты API отдает в московском времени (`+03:00`). При обращении к несуществующему пользователю API теперь возвращает `404 user_not_found` вместо общего `data_integrity_error`.

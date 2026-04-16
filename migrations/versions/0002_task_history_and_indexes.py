@@ -20,9 +20,9 @@ def upgrade() -> None:
 
     op.create_table(
         "task_history",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("task_id", sa.Integer(), nullable=False),
-        sa.Column("changed_by_user_id", sa.Integer(), nullable=False),
+        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
+        sa.Column("task_id", sa.Uuid(as_uuid=True), nullable=False),
+        sa.Column("changed_by_user_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("action", sa.String(length=32), nullable=False),
         sa.Column("old_status", sa.String(length=32), nullable=True),
         sa.Column("new_status", sa.String(length=32), nullable=True),
@@ -51,12 +51,20 @@ def upgrade() -> None:
         ),
     )
 
+    users_table = sa.table(
+        "users",
+        sa.column("username", sa.String(length=64)),
+        sa.column("full_name", sa.String(length=255)),
+    )
     op.execute(
-        """
-        UPDATE users
-        SET full_name = username
-        WHERE full_name IS NULL OR trim(full_name) = ''
-        """
+        users_table.update()
+        .where(
+            sa.or_(
+                users_table.c.full_name.is_(None),
+                sa.func.trim(users_table.c.full_name) == "",
+            )
+        )
+        .values(full_name=users_table.c.username)
     )
 
     with op.batch_alter_table("users") as batch_op:

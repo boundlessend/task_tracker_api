@@ -20,7 +20,7 @@ def upgrade() -> None:
 
     op.create_table(
         "users",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
         sa.Column("username", sa.String(length=64), nullable=False),
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=True),
@@ -36,7 +36,7 @@ def upgrade() -> None:
 
     op.create_table(
         "tasks",
-        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
         sa.Column("title", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column(
@@ -45,8 +45,8 @@ def upgrade() -> None:
             nullable=False,
             server_default="todo",
         ),
-        sa.Column("author_id", sa.Integer(), nullable=False),
-        sa.Column("assignee_id", sa.Integer(), nullable=True),
+        sa.Column("author_id", sa.Uuid(as_uuid=True), nullable=False),
+        sa.Column("assignee_id", sa.Uuid(as_uuid=True), nullable=True),
         sa.Column("due_date", sa.DateTime(), nullable=True),
         sa.Column(
             "created_at",
@@ -74,9 +74,9 @@ def upgrade() -> None:
 
     op.create_table(
         "comments",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("task_id", sa.Integer(), nullable=False),
-        sa.Column("author_id", sa.Integer(), nullable=False),
+        sa.Column("id", sa.Uuid(as_uuid=True), primary_key=True),
+        sa.Column("task_id", sa.Uuid(as_uuid=True), nullable=False),
+        sa.Column("author_id", sa.Uuid(as_uuid=True), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column(
             "created_at",

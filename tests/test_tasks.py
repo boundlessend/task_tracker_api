@@ -1,11 +1,19 @@
-from sqlalchemy import text
-from fastapi.testclient import TestClient
+from __future__ import annotations
 
+from uuid import UUID
+
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.models import TaskHistory
 from app.db.session import get_engine
 from app.main import create_app
 
+MISSING_UUID = "00000000-0000-0000-0000-000000000999"
 
-def _create_user(client: TestClient, *, username: str, email: str) -> int:
+
+def _create_user(client: TestClient, *, username: str, email: str) -> str:
     """создает пользователя и возвращает его id"""
 
     response = client.post(
@@ -26,7 +34,7 @@ def test_tasks_are_saved_in_database_between_requests(
     """проверяет что задачи сохраняются в базе данных"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
+    owner_id = _create_user(
         client,
         username="maria",
         email="maria@example.com",
@@ -37,8 +45,8 @@ def test_tasks_are_saved_in_database_between_requests(
         json={
             "title": "Поднять PostgreSQL",
             "description": "Добавить docker compose и миграции",
-            "author_id": author_id,
-            "assignee_id": author_id,
+            "owner_id": owner_id,
+            "assignee_id": owner_id,
             "status": "todo",
         },
     )
@@ -57,17 +65,24 @@ def test_tasks_are_saved_in_database_between_requests(
     assert len(body["items"]) == 1
     assert body["items"][0]["title"] == "Поднять PostgreSQL"
     assert body["items"][0]["status"] == "todo"
-    assert body["items"][0]["author_username"] == "maria"
+    assert body["items"][0]["owner"] == {
+        "id": owner_id,
+        "username": "maria",
+        "full_name": "Maria",
+    }
     assert body["items"][0]["archived_at"] is None
+    assert body["items"][0]["closed_at"] is None
+    assert body["items"][0]["created_at"].endswith("+03:00")
+    assert body["items"][0]["updated_at"].endswith("+03:00")
 
 
 def test_task_contract_endpoints_work_together(
     migrated_sqlite_db: str,
 ) -> None:
-    """проверяет новые ручки задач и форму ответов"""
+    """проверяет ручки задач и связанные сущности"""
 
     client = TestClient(create_app())
-    author_id = _create_user(client, username="ivan", email="ivan@example.com")
+    owner_id = _create_user(client, username="ivan", email="ivan@example.com")
     assignee_id = _create_user(
         client, username="anna", email="anna@example.com"
     )
@@ -77,16 +92,25 @@ def test_task_contract_endpoints_work_together(
         json={
             "title": "Подготовить api note",
             "description": "Согласовать контракт",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "status": "todo",
+            "due_date": "2026-04-20T12:00:00",
         },
     )
     assert created_task.status_code == 201
     task_id = created_task.json()["id"]
+    assert created_task.json()["history"][0]["action"] == "created"
+    assert created_task.json()["due_date"] == "2026-04-20T12:00:00+03:00"
 
     fetched_task = client.get(f"/tasks/{task_id}")
     assert fetched_task.status_code == 200
     assert fetched_task.json()["title"] == "Подготовить api note"
+    assert fetched_task.json()["owner"] == {
+        "id": owner_id,
+        "username": "ivan",
+        "full_name": "Ivan",
+    }
+    assert fetched_task.json()["comments"] == []
 
     patched_task = client.patch(
         f"/tasks/{task_id}",
@@ -106,17 +130,28 @@ def test_task_contract_endpoints_work_together(
     )
     assert assign_response.status_code == 200
     assert assign_response.json()["assignee_id"] == assignee_id
-    assert assign_response.json()["assignee_username"] == "anna"
+    assert assign_response.json()["assignee"] == {
+        "id": assignee_id,
+        "username": "anna",
+        "full_name": "Anna",
+    }
 
     comment_response = client.post(
         f"/tasks/{task_id}/comments",
         json={
-            "author_id": author_id,
+            "author_id": owner_id,
             "text": "Первый комментарий",
         },
     )
     assert comment_response.status_code == 201
     assert comment_response.json()["task_id"] == task_id
+    assert comment_response.json()["author"] == {
+        "id": owner_id,
+        "username": "ivan",
+        "full_name": "Ivan",
+    }
+    assert comment_response.json()["created_at"].endswith("+03:00")
+    assert comment_response.json()["updated_at"].endswith("+03:00")
 
     comments_response = client.get(f"/tasks/{task_id}/comments")
     assert comments_response.status_code == 200
@@ -124,11 +159,28 @@ def test_task_contract_endpoints_work_together(
         {
             "id": comment_response.json()["id"],
             "task_id": task_id,
-            "author_id": author_id,
-            "author_username": "ivan",
+            "author_id": owner_id,
             "text": "Первый комментарий",
             "created_at": comment_response.json()["created_at"],
+            "updated_at": comment_response.json()["updated_at"],
+            "author": {
+                "id": owner_id,
+                "username": "ivan",
+                "full_name": "Ivan",
+            },
         }
+    ]
+
+    detailed_task = client.get(f"/tasks/{task_id}")
+    assert detailed_task.status_code == 200
+    detailed_body = detailed_task.json()
+    assert detailed_body["comment_count"] == 1
+    assert len(detailed_body["comments"]) == 1
+    assert detailed_body["comments"][0]["text"] == "Первый комментарий"
+    assert [entry["action"] for entry in detailed_body["history"]] == [
+        "created",
+        "status_changed",
+        "comment_added",
     ]
 
     filtered_tasks = client.get(
@@ -162,7 +214,7 @@ def test_task_contract_endpoints_work_together(
     assert export_response.status_code == 200
     assert export_response.headers["content-type"].startswith("text/csv")
     assert "Подготовить краткий api note" in export_response.text
-    assert "author_username" in export_response.text
+    assert "owner_username" in export_response.text
 
     archive_response = client.post(f"/tasks/{task_id}/archive")
     assert archive_response.status_code == 200
@@ -193,7 +245,7 @@ def test_task_history_is_written_for_create_status_and_comment(
     """проверяет что история задачи пишется для ключевых действий"""
 
     client = TestClient(create_app())
-    author_id = _create_user(client, username="olga", email="olga@example.com")
+    owner_id = _create_user(client, username="olga", email="olga@example.com")
     assignee_id = _create_user(
         client, username="petr", email="petr@example.com"
     )
@@ -203,7 +255,7 @@ def test_task_history_is_written_for_create_status_and_comment(
         json={
             "title": "Проверить историю",
             "description": "Нужны записи для создания, комментария и статуса",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "assignee_id": assignee_id,
             "status": "todo",
         },
@@ -229,32 +281,26 @@ def test_task_history_is_written_for_create_status_and_comment(
     )
     assert change_status.status_code == 200
 
-    with get_engine().connect() as connection:
-        history_rows = (
-            connection.execute(
-                text(
-                    """
-                    SELECT
-                        action,
-                        changed_by_user_id,
-                        old_status,
-                        new_status,
-                        comment_text
-                    FROM task_history
-                    WHERE task_id = :task_id
-                    ORDER BY id ASC
-                    """
-                ),
-                {"task_id": task_id},
-            )
-            .mappings()
-            .all()
-        )
+    with Session(get_engine()) as session:
+        history_rows = session.scalars(
+            select(TaskHistory)
+            .where(TaskHistory.task_id == UUID(task_id))
+            .order_by(TaskHistory.created_at.asc(), TaskHistory.id.asc())
+        ).all()
 
-    assert history_rows == [
+    assert [
+        {
+            "action": row.action,
+            "changed_by_user_id": str(row.changed_by_user_id),
+            "old_status": row.old_status,
+            "new_status": row.new_status,
+            "comment_text": row.comment_text,
+        }
+        for row in history_rows
+    ] == [
         {
             "action": "created",
-            "changed_by_user_id": author_id,
+            "changed_by_user_id": owner_id,
             "old_status": None,
             "new_status": "todo",
             "comment_text": None,
@@ -309,7 +355,7 @@ def test_postgres_flow_and_case_insensitive_email_unique(
         json={
             "title": "Проверить PostgreSQL",
             "description": "Нужен прямой интеграционный тест",
-            "author_id": first_user.json()["id"],
+            "owner_id": first_user.json()["id"],
             "assignee_id": first_user.json()["id"],
             "status": "todo",
         },
@@ -346,13 +392,13 @@ def test_get_task_returns_404_for_unknown_id(
 
     client = TestClient(create_app())
 
-    response = client.get("/tasks/999999")
+    response = client.get(f"/tasks/{MISSING_UUID}")
 
     assert response.status_code == 404
     assert response.json() == {
         "error_code": "task_not_found",
-        "message": "Задача с id=999999 не найдена.",
-        "details": {"task_id": 999999},
+        "message": f"Задача с id={MISSING_UUID} не найдена.",
+        "details": {"task_id": MISSING_UUID},
     }
 
 
@@ -364,15 +410,15 @@ def test_update_task_returns_404_for_unknown_id(
     client = TestClient(create_app())
 
     response = client.patch(
-        "/tasks/999999",
+        f"/tasks/{MISSING_UUID}",
         json={"title": "обновить несуществующую задачу"},
     )
 
     assert response.status_code == 404
     assert response.json() == {
         "error_code": "task_not_found",
-        "message": "Задача с id=999999 не найдена.",
-        "details": {"task_id": 999999},
+        "message": f"Задача с id={MISSING_UUID} не найдена.",
+        "details": {"task_id": MISSING_UUID},
     }
 
 
@@ -382,7 +428,7 @@ def test_assign_task_moves_todo_to_in_progress(
     """проверяет контракт назначения исполнителя со сменой статуса"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
+    owner_id = _create_user(
         client, username="sergey", email="sergey@example.com"
     )
     assignee_id = _create_user(
@@ -394,7 +440,7 @@ def test_assign_task_moves_todo_to_in_progress(
         json={
             "title": "Назначить исполнителя",
             "description": "После назначения задача должна стартовать",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "status": "todo",
         },
     )
@@ -411,20 +457,20 @@ def test_assign_task_moves_todo_to_in_progress(
     assert assign_response.json()["status"] == "in_progress"
 
 
-def test_close_task_changes_status_and_rejects_second_close(
+def test_close_task_changes_status_and_sets_closed_at(
     migrated_sqlite_db: str,
 ) -> None:
     """проверяет отдельную ручку закрытия задачи"""
 
     client = TestClient(create_app())
-    author_id = _create_user(client, username="nina", email="nina@example.com")
+    owner_id = _create_user(client, username="nina", email="nina@example.com")
 
     create_response = client.post(
         "/tasks",
         json={
             "title": "Закрыть задачу",
             "description": "Проверить контракт close",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "status": "in_progress",
         },
     )
@@ -433,15 +479,17 @@ def test_close_task_changes_status_and_rejects_second_close(
 
     close_response = client.post(
         f"/tasks/{task_id}/close",
-        json={"changed_by_user_id": author_id},
+        json={"changed_by_user_id": owner_id},
     )
 
     assert close_response.status_code == 200
     assert close_response.json()["status"] == "done"
+    assert close_response.json()["closed_at"] is not None
+    assert close_response.json()["closed_at"].endswith("+03:00")
 
     second_close = client.post(
         f"/tasks/{task_id}/close",
-        json={"changed_by_user_id": author_id},
+        json={"changed_by_user_id": owner_id},
     )
 
     assert second_close.status_code == 409
@@ -452,13 +500,92 @@ def test_close_task_changes_status_and_rejects_second_close(
     }
 
 
+def test_status_update_clears_closed_at_when_task_reopens(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет согласованность closed_at при смене статуса"""
+
+    client = TestClient(create_app())
+    owner_id = _create_user(client, username="max", email="max@example.com")
+
+    task_response = client.post(
+        "/tasks",
+        json={
+            "title": "Переоткрыть задачу",
+            "owner_id": owner_id,
+            "status": "in_progress",
+        },
+    )
+    assert task_response.status_code == 201
+    task_id = task_response.json()["id"]
+
+    close_response = client.patch(
+        f"/tasks/{task_id}/status",
+        json={
+            "status": "done",
+            "changed_by_user_id": owner_id,
+        },
+    )
+    assert close_response.status_code == 200
+    assert close_response.json()["closed_at"] is not None
+
+    reopen_response = client.patch(
+        f"/tasks/{task_id}/status",
+        json={
+            "status": "in_progress",
+            "changed_by_user_id": owner_id,
+        },
+    )
+    assert reopen_response.status_code == 200
+    assert reopen_response.json()["closed_at"] is None
+
+
+def test_comment_update_uses_separate_update_schema(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет отдельную модель обновления комментария"""
+
+    client = TestClient(create_app())
+    owner_id = _create_user(client, username="kate", email="kate@example.com")
+
+    task_response = client.post(
+        "/tasks",
+        json={
+            "title": "Обновить комментарий",
+            "owner_id": owner_id,
+        },
+    )
+    assert task_response.status_code == 201
+
+    comment_response = client.post(
+        f"/tasks/{task_response.json()['id']}/comments",
+        json={
+            "author_id": owner_id,
+            "text": "Исходный комментарий",
+        },
+    )
+    assert comment_response.status_code == 201
+
+    updated_comment = client.patch(
+        f"/comments/{comment_response.json()['id']}",
+        json={"text": "Обновленный комментарий"},
+    )
+    assert updated_comment.status_code == 200
+    assert updated_comment.json()["text"] == "Обновленный комментарий"
+    assert updated_comment.json()["author"] == {
+        "id": owner_id,
+        "username": "kate",
+        "full_name": "Kate",
+    }
+
+
 def test_task_create_rejects_extra_fields(
     migrated_sqlite_db: str,
 ) -> None:
     """проверяет запрет лишних полей при создании задачи"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
+    owner_id = _create_user(
         client, username="extra", email="extra@example.com"
     )
 
@@ -466,7 +593,7 @@ def test_task_create_rejects_extra_fields(
         "/tasks",
         json={
             "title": "лишнее поле",
-            "author_id": author_id,
+            "owner_id": owner_id,
             "unexpected": True,
         },
     )
@@ -483,14 +610,14 @@ def test_task_update_rejects_extra_fields(
     """проверяет запрет лишних полей при обновлении задачи"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
+    owner_id = _create_user(
         client, username="patcher", email="patcher@example.com"
     )
     task_id = client.post(
         "/tasks",
         json={
             "title": "обновляемая задача",
-            "author_id": author_id,
+            "owner_id": owner_id,
         },
     ).json()["id"]
 
@@ -511,14 +638,14 @@ def test_task_update_requires_at_least_one_field(
     """проверяет transport validation для пустого patch"""
 
     client = TestClient(create_app())
-    author_id = _create_user(
+    owner_id = _create_user(
         client, username="empty", email="empty@example.com"
     )
     task_id = client.post(
         "/tasks",
         json={
             "title": "пустой patch",
-            "author_id": author_id,
+            "owner_id": owner_id,
         },
     ).json()["id"]
 
@@ -565,3 +692,30 @@ def test_create_task_handles_malformed_json(
     body = response.json()
     assert body["error_code"] == "malformed_json"
     assert body["details"][0]["location"][0] == "body"
+
+
+def test_create_task_returns_404_when_owner_does_not_exist(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет что создание задачи с неизвестным owner_id дает 404"""
+
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/tasks",
+        json={
+            "title": "Новая задача",
+            "description": "Без существующего owner",
+            "owner_id": MISSING_UUID,
+            "status": "todo",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error_code": "user_not_found",
+        "message": (
+            f"Пользователь для поля owner_id с id={MISSING_UUID} " "не найден."
+        ),
+        "details": {"field": "owner_id", "user_id": MISSING_UUID},
+    }
