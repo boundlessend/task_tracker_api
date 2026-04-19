@@ -105,3 +105,33 @@ def test_create_app_uses_passed_settings_for_database(
     assert second_tasks.status_code == 200
     assert first_tasks.json()["meta"]["total"] == 1
     assert second_tasks.json()["meta"]["total"] == 0
+
+
+def test_create_app_seeds_demo_data_for_dev_profile(
+    tmp_path: Path,
+) -> None:
+    """проверяет автоматическое добавление демо-данных в dev"""
+
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'seeded.db'}"
+    app = create_app(
+        Settings(
+            app_env=AppEnv.DEV,
+            debug=False,
+            database_url=db_url,
+            auto_create_schema=True,
+            seed_demo_data=True,
+        )
+    )
+
+    with TestClient(app) as client:
+        users_response = client.get("/users")
+        tasks_response = client.get("/tasks")
+
+    assert users_response.status_code == 200
+    assert tasks_response.status_code == 200
+    assert sorted(user["username"] for user in users_response.json()) == [
+        "anna",
+        "ivan",
+    ]
+    assert tasks_response.json()["meta"]["total"] == 1
+    assert tasks_response.json()["items"][0]["title"] == "Подготовить api note"

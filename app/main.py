@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 
+from app.bootstrap import prepare_application_data
 from app.core.logging import configure_logging
 from app.core.settings import AppEnv, Settings, get_settings
 from app.exceptions.handlers import register_exception_handlers
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
         settings.app_port,
         settings.debug,
     )
+    prepare_application_data(settings)
     yield
     logger.info("Останавливаем приложение")
 

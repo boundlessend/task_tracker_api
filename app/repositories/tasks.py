@@ -526,7 +526,20 @@ class TaskRepository:
         archived_at = to_storage_datetime(now_msk())
         task.archived_at = archived_at
         task.updated_at = archived_at
-        self.session.commit()
+
+        try:
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise DataIntegrityError(
+                "Не удалось архивировать задачу. "
+                "Проверьте ограничения полей.",
+                details={
+                    "entity": "task",
+                    "operation": "archive",
+                    "task_id": str(task_id),
+                },
+            ) from exc
         return self.get_task(task_id)
 
     def update_task_status(
@@ -541,6 +554,9 @@ class TaskRepository:
         task = self._get_task_model(task_id)
 
         old_status = task.status
+        if old_status == status.value:
+            return self._map_task_read(task)
+
         task.status = status.value
         current_time = to_storage_datetime(now_msk())
         if status == TaskStatus.DONE:

@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     database_url: str = Field(min_length=1)
     database_echo: bool = False
     fake_database_url: str | None = None
+    auto_create_schema: bool = False
+    seed_demo_data: bool = False
 
     model_config = SettingsConfigDict(
         env_prefix="",
@@ -81,8 +83,7 @@ def get_settings() -> Settings:
     """читает и кеширует настройки приложения"""
 
     try:
-        return Settings(
-            _env_file=env_files_for(os.getenv("APP_ENV", AppEnv.DEV.value))
-        )
+        app_env = os.getenv("APP_ENV", AppEnv.DEV.value)
+        return Settings(_env_file=env_files_for(app_env))
     except ValidationError as exc:
         raise AppConfigurationError(_format_validation_error(exc)) from exc

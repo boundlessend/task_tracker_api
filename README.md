@@ -3,8 +3,8 @@
 ## установка
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 ```
@@ -14,6 +14,15 @@ python -m pip install -r requirements-dev.txt
 ```bash
 cp .env.example .env.dev
 python -m app
+```
+
+по умолчанию локальный запуск использует sqlite-файл `task_tracker.db`. При первом старте приложение само создает схему и добавляет демо-данные.
+
+демо-пользователи:
+
+```text
+ivan / ivan@example.com
+anna / anna@example.com
 ```
 
 swagger ui:
@@ -161,8 +170,3 @@ curl http://127.0.0.1:8000/tasks/summary
 ```bash
 curl -OJ http://127.0.0.1:8000/tasks/export
 ```
-
-
-## быстрый старт в swagger
-
-создай хотя бы одного пользователя через `POST /users`, а уже потом передавай его `id` в формате UUID в `owner_id`, `assignee_id` и `author_id`. Все системные даты API отдает в московском времени (`+03:00`). При обращении к несуществующему пользователю API теперь возвращает `404 user_not_found` вместо общего `data_integrity_error`.

@@ -322,6 +322,49 @@ def test_task_history_is_written_for_create_status_and_comment(
     ]
 
 
+def test_update_task_status_does_not_duplicate_history_on_same_status(
+    migrated_sqlite_db: str,
+) -> None:
+    """проверяет что повторная установка того же статуса не пишет историю"""
+
+    client = TestClient(create_app())
+    owner_id = _create_user(client, username="nina", email="nina@example.com")
+
+    created_task = client.post(
+        "/tasks",
+        json={
+            "title": "Проверить повтор статуса",
+            "description": "История не должна дублироваться",
+            "owner_id": owner_id,
+            "status": "todo",
+        },
+    )
+    assert created_task.status_code == 201
+    task_id = created_task.json()["id"]
+
+    repeated_status = client.patch(
+        f"/tasks/{task_id}/status",
+        json={
+            "status": "todo",
+            "changed_by_user_id": owner_id,
+        },
+    )
+    assert repeated_status.status_code == 200
+    assert [entry["action"] for entry in repeated_status.json()["history"]] == [
+        "created"
+    ]
+
+    with Session(get_engine()) as session:
+        history_rows = session.scalars(
+            select(TaskHistory)
+            .where(TaskHistory.task_id == UUID(task_id))
+            .order_by(TaskHistory.created_at.asc(), TaskHistory.id.asc())
+        ).all()
+
+    assert len(history_rows) == 1
+    assert history_rows[0].action == "created"
+
+
 def test_postgres_flow_and_case_insensitive_email_unique(
     migrated_postgres_db: str,
 ) -> None:

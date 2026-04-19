@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.core.time import from_storage_datetime
+from app.core.time import from_storage_datetime, now_msk, to_storage_datetime
 from app.db.models import Comment, Task, TaskHistory, User
 from app.exceptions.errors import (
     CommentNotFoundError,
@@ -136,8 +136,9 @@ class CommentRepository:
         if not updates:
             return self._map_comment(comment)
 
-        for field_name, value in updates.items():
-            setattr(comment, field_name, value)
+        if "text" in updates:
+            comment.text = updates["text"]
+        comment.updated_at = to_storage_datetime(now_msk())
 
         try:
             self.session.commit()
