@@ -4,27 +4,33 @@ import csv
 from io import StringIO
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 
+from app.dependencies.auth import CurrentUserDep, get_current_user
 from app.dependencies.services import CommentServiceDep, TaskServiceDep
 from app.schemas.comments import CommentCreate, CommentRead, TaskCommentCreate
 from app.schemas.tasks import (
     SortOrder,
     TaskAssign,
-    TaskClose,
     TaskCreate,
+    TaskCreateRequest,
     TaskListItemRead,
     TaskListResponse,
     TaskRead,
     TaskSortField,
     TaskStatus,
-    TaskStatusUpdate,
+    TaskStatusUpdateRequest,
     TaskSummaryByStatus,
     TaskSummaryRead,
     TaskUpdate,
 )
+from app.services.access import ensure_assignment_allowed
 
-router = APIRouter(prefix="/tasks", tags=["tasks"])
+router = APIRouter(
+    prefix="/tasks",
+    tags=["tasks"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 def _render_tasks_csv(tasks: list[TaskListItemRead]) -> str:
@@ -158,10 +164,11 @@ def export_tasks(
 def get_task(
     task_id: UUID,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """возвращает задачу по идентификатору"""
 
-    return service.get_task(task_id)
+    return service.get_task_for_user(task_id, current_user)
 
 
 @router.get("/{task_id}/comments", response_model=list[CommentRead])
@@ -169,21 +176,31 @@ def list_task_comments(
     task_id: UUID,
     task_service: TaskServiceDep,
     comment_service: CommentServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> list[CommentRead]:
     """возвращает комментарии задачи"""
 
-    task_service.get_task(task_id)
+    task_service.get_task_for_user(task_id, current_user)
     return comment_service.list_comments(task_id=task_id)
 
 
 @router.post("", response_model=TaskRead, status_code=201)
 def create_task(
-    payload: TaskCreate,
+    payload: TaskCreateRequest,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """создает задачу"""
 
-    return service.create_task(payload)
+    if payload.assignee_id is not None:
+        ensure_assignment_allowed(payload.assignee_id, current_user)
+
+    return service.create_task(
+        TaskCreate(
+            **payload.model_dump(),
+            owner_id=current_user.id,
+        )
+    )
 
 
 @router.patch("/{task_id}", response_model=TaskRead)
@@ -191,10 +208,15 @@ def update_task(
     task_id: UUID,
     payload: TaskUpdate,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """частично обновляет задачу"""
 
-    return service.update_task(task_id=task_id, payload=payload)
+    return service.update_task_for_user(
+        task_id=task_id,
+        payload=payload,
+        current_user=current_user,
+    )
 
 
 @router.post("/{task_id}/assign", response_model=TaskRead)
@@ -202,24 +224,26 @@ def assign_task(
     task_id: UUID,
     payload: TaskAssign,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """назначает исполнителя задаче"""
 
-    return service.assign_task(
+    return service.assign_task_for_user(
         task_id=task_id,
         assignee_id=payload.assignee_id,
+        current_user=current_user,
     )
 
 
 @router.post("/{task_id}/close", response_model=TaskRead)
 def close_task(
     task_id: UUID,
-    payload: TaskClose,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """закрывает задачу"""
 
-    return service.close_task(task_id=task_id, payload=payload)
+    return service.close_task_for_user(task_id=task_id, current_user=current_user)
 
 
 @router.post(
@@ -230,14 +254,15 @@ def create_task_comment(
     payload: TaskCommentCreate,
     task_service: TaskServiceDep,
     comment_service: CommentServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> CommentRead:
     """создает комментарий у задачи"""
 
-    task_service.get_task(task_id)
+    task_service.get_task_for_user(task_id, current_user)
     return comment_service.create_comment(
         CommentCreate(
             task_id=task_id,
-            author_id=payload.author_id,
+            author_id=current_user.id,
             text=payload.text,
         )
     )
@@ -247,22 +272,24 @@ def create_task_comment(
 def archive_task(
     task_id: UUID,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """архивирует задачу"""
 
-    return service.archive_task(task_id)
+    return service.archive_task_for_user(task_id, current_user)
 
 
 @router.patch("/{task_id}/status", response_model=TaskRead)
 def update_task_status(
     task_id: UUID,
-    payload: TaskStatusUpdate,
+    payload: TaskStatusUpdateRequest,
     service: TaskServiceDep,
+    current_user: CurrentUserDep = Depends(get_current_user),
 ) -> TaskRead:
     """обновляет статус задачи"""
 
-    return service.update_task_status(
+    return service.update_task_status_for_user(
         task_id=task_id,
         status=payload.status,
-        changed_by_user_id=payload.changed_by_user_id,
+        current_user=current_user,
     )

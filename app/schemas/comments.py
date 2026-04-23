@@ -9,7 +9,7 @@ from app.schemas.users import UserRefRead
 
 
 class CommentCreate(BaseModel):
-    """данные для создания комментария"""
+    """внутренние данные для создания комментария"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -23,7 +23,15 @@ class TaskCommentCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    author_id: UUID
+    text: str = Field(min_length=1)
+
+
+class CommentCreateRequest(BaseModel):
+    """данные запроса на создание комментария"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: UUID
     text: str = Field(min_length=1)
 
 

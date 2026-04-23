@@ -16,7 +16,7 @@ cp .env.example .env.dev
 python -m app
 ```
 
-по умолчанию локальный запуск использует sqlite-файл `task_tracker.db`. При первом старте приложение само создает схему и добавляет демо-данные.
+по умолчанию локальный запуск использует sqlite-файл `task_tracker.db`. при первом старте приложение само создает схему и добавляет демо-данные.
 
 демо-пользователи:
 
@@ -113,16 +113,24 @@ make check
 make down
 ```
 
+## учебная аутентификация
+
+логин выдает простой bearer-токен формата `stub:<username>`:
+
+```bash
+curl -X POST http://127.0.0.1:8000/auth/login   -H 'Content-Type: application/json'   -d '{"username": "ivan"}'
+```
+
+для защищенных ручек можно использовать либо `authorization: bearer stub:<username>`, либо stub-заголовок `x-auth-user: <username>`.
+
 ## примеры ручек
 
 создать задачу:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'   -d '{
+curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'   -H 'x-auth-user: ivan'   -d '{
     "title": "подготовить api note",
     "description": "согласовать контракт",
-    "owner_id": "11111111-1111-4111-8111-111111111111",
-    "assignee_id": "22222222-2222-4222-8222-222222222222",
     "status": "todo"
   }'
 ```
@@ -130,13 +138,13 @@ curl -X POST http://127.0.0.1:8000/tasks   -H 'Content-Type: application/json'  
 получить список задач:
 
 ```bash
-curl 'http://127.0.0.1:8000/tasks?status=todo&owner_id=11111111-1111-4111-8111-111111111111&assignee_id=22222222-2222-4222-8222-222222222222&sort_by=updated_at&sort_order=desc'
+curl 'http://127.0.0.1:8000/tasks?status=todo&sort_by=updated_at&sort_order=desc'   -H 'x-auth-user: ivan'
 ```
 
 обновить задачу:
 
 ```bash
-curl -X PATCH http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333   -H 'Content-Type: application/json'   -d '{
+curl -X PATCH http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333   -H 'Content-Type: application/json'   -H 'x-auth-user: ivan'   -d '{
     "title": "подготовить краткий api note",
     "description": null
   }'
@@ -145,16 +153,15 @@ curl -X PATCH http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333  
 назначить исполнителя:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/assign   -H 'Content-Type: application/json'   -d '{
-    "assignee_id": "22222222-2222-4222-8222-222222222222"
+curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/assign   -H 'Content-Type: application/json'   -H 'x-auth-user: ivan'   -d '{
+    "assignee_id": "11111111-1111-4111-8111-111111111111"
   }'
 ```
 
 добавить комментарий:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/comments   -H 'Content-Type: application/json'   -d '{
-    "author_id": "11111111-1111-4111-8111-111111111111",
+curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/comments   -H 'Content-Type: application/json'   -H 'x-auth-user: ivan'   -d '{
     "text": "первый комментарий"
   }'
 ```
@@ -162,11 +169,11 @@ curl -X POST http://127.0.0.1:8000/tasks/33333333-3333-4333-8333-333333333333/co
 получить саммари:
 
 ```bash
-curl http://127.0.0.1:8000/tasks/summary
+curl http://127.0.0.1:8000/tasks/summary -H 'x-auth-user: ivan'
 ```
 
 выгрузить csv:
 
 ```bash
-curl -OJ http://127.0.0.1:8000/tasks/export
+curl -OJ http://127.0.0.1:8000/tasks/export -H 'x-auth-user: ivan'
 ```

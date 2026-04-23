@@ -3,13 +3,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.core.time import now_msk, to_storage_datetime
+from app.schemas.users import UserRole
 
 TASK_STATUSES = ("todo", "in_progress", "done")
 TASK_HISTORY_ACTIONS = ("created", "status_changed", "comment_added")
+USER_ROLES = tuple(role.value for role in UserRole)
 
 
 class Base(DeclarativeBase):
@@ -20,6 +22,12 @@ class User(Base):
     """orm-модель пользователя"""
 
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN {USER_ROLES}",
+            name="ck_users_role_allowed",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
@@ -36,6 +44,16 @@ class User(Base):
         unique=True,
     )
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=UserRole.USER.value,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean(),
+        nullable=False,
+        default=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(),
         nullable=False,

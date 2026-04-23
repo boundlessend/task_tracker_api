@@ -40,7 +40,7 @@ def migrate_sqlite_db(
     return db_url
 
 
-def create_user(client: TestClient, *, username: str, email: str) -> int:
+def create_user(client: TestClient, *, username: str, email: str) -> str:
     """создает пользователя и возвращает его id"""
 
     response = client.post(
@@ -82,7 +82,7 @@ def test_create_app_uses_passed_settings_for_database(
     first_client = TestClient(first_app)
     second_client = TestClient(second_app)
 
-    owner_id = create_user(
+    create_user(
         first_client,
         username="maria",
         email="maria@example.com",
@@ -92,19 +92,21 @@ def test_create_app_uses_passed_settings_for_database(
         json={
             "title": "Изолированная задача",
             "description": "Должна остаться только в первой базе",
-            "owner_id": owner_id,
             "status": "todo",
         },
+        headers={"X-Auth-User": "maria"},
     )
     assert task_response.status_code == 201
 
-    first_tasks = first_client.get("/tasks")
-    second_tasks = second_client.get("/tasks")
+    first_tasks = first_client.get("/tasks", headers={"X-Auth-User": "maria"})
+    second_tasks = second_client.get(
+        "/tasks",
+        headers={"X-Auth-User": "maria"},
+    )
 
     assert first_tasks.status_code == 200
-    assert second_tasks.status_code == 200
+    assert second_tasks.status_code == 401
     assert first_tasks.json()["meta"]["total"] == 1
-    assert second_tasks.json()["meta"]["total"] == 0
 
 
 def test_create_app_seeds_demo_data_for_dev_profile(
@@ -125,7 +127,7 @@ def test_create_app_seeds_demo_data_for_dev_profile(
 
     with TestClient(app) as client:
         users_response = client.get("/users")
-        tasks_response = client.get("/tasks")
+        tasks_response = client.get("/tasks", headers={"X-Auth-User": "ivan"})
 
     assert users_response.status_code == 200
     assert tasks_response.status_code == 200

@@ -21,6 +21,26 @@ class AppConfigurationError(AppError):
     error_code = "app_configuration_error"
 
 
+class AuthenticationError(AppError):
+    """ошибка аутентификации"""
+
+    status_code = 401
+    error_code = "authentication_error"
+
+
+class ForbiddenError(AppError):
+    """ошибка доступа"""
+
+    status_code = 403
+    error_code = "forbidden"
+
+
+class InactiveUserError(ForbiddenError):
+    """ошибка деактивированного пользователя"""
+
+    error_code = "inactive_user"
+
+
 class TaskTrackerError(AppError):
     """базовая ошибка домена задач"""
 

@@ -153,11 +153,25 @@ def task_service(db_session: Session) -> TaskService:
 
 
 @pytest.fixture()
+def auth_headers() -> Callable[[str], dict[str, str]]:
+    """возвращает stub-заголовок для пользователя"""
+
+    def _auth_headers(username: str) -> dict[str, str]:
+        return {"X-Auth-User": username}
+
+    return _auth_headers
+
+
+@pytest.fixture()
 def create_user(client: TestClient) -> Callable[..., str]:
     """создает пользователя через api и возвращает его id"""
 
     def _create_user(
-        *, username: str, email: str, full_name: str | None = None
+        *,
+        username: str,
+        email: str,
+        full_name: str | None = None,
+        role: str = "user",
     ) -> str:
         response = client.post(
             "/users",
@@ -165,6 +179,7 @@ def create_user(client: TestClient) -> Callable[..., str]:
                 "username": username,
                 "email": email,
                 "full_name": full_name or username.title(),
+                "role": role,
             },
         )
         assert response.status_code == 201
@@ -174,12 +189,15 @@ def create_user(client: TestClient) -> Callable[..., str]:
 
 
 @pytest.fixture()
-def create_task(client: TestClient) -> Callable[..., dict[str, object]]:
+def create_task(
+    client: TestClient,
+    auth_headers: Callable[[str], dict[str, str]],
+) -> Callable[..., dict[str, object]]:
     """создает задачу через api и возвращает тело ответа"""
 
     def _create_task(
         *,
-        owner_id: str,
+        username: str,
         title: str = "Новая задача",
         description: str | None = None,
         assignee_id: str | None = None,
@@ -188,7 +206,6 @@ def create_task(client: TestClient) -> Callable[..., dict[str, object]]:
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "title": title,
-            "owner_id": owner_id,
             "status": status,
         }
         if description is not None:
@@ -198,7 +215,11 @@ def create_task(client: TestClient) -> Callable[..., dict[str, object]]:
         if due_date is not None:
             payload["due_date"] = due_date
 
-        response = client.post("/tasks", json=payload)
+        response = client.post(
+            "/tasks",
+            json=payload,
+            headers=auth_headers(username),
+        )
         assert response.status_code == 201
         return response.json()
 

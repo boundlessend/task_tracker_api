@@ -34,7 +34,23 @@ class SortOrder(str, Enum):
 
 
 class TaskCreate(BaseModel):
-    """данные для создания задачи"""
+    """внутренние данные для создания задачи"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    owner_id: UUID
+    assignee_id: UUID | None = None
+    status: TaskStatus = TaskStatus.TODO
+    due_date: datetime | None = None
+
+
+class TaskCreateRequest(BaseModel):
+    """данные запроса на создание задачи"""
 
     model_config = ConfigDict(
         extra="forbid",
@@ -43,7 +59,6 @@ class TaskCreate(BaseModel):
             "example": {
                 "title": "Подготовить api note",
                 "description": "Согласовать контракт ручек",
-                "owner_id": "11111111-1111-4111-8111-111111111111",
                 "assignee_id": "22222222-2222-4222-8222-222222222222",
                 "status": "todo",
                 "due_date": "2026-04-20T12:00:00+03:00",
@@ -53,7 +68,6 @@ class TaskCreate(BaseModel):
 
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    owner_id: UUID
     assignee_id: UUID | None = None
     status: TaskStatus = TaskStatus.TODO
     due_date: datetime | None = None
@@ -89,21 +103,12 @@ class TaskAssign(BaseModel):
     assignee_id: UUID
 
 
-class TaskClose(BaseModel):
-    """данные для закрытия задачи"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    changed_by_user_id: UUID
-
-
-class TaskStatusUpdate(BaseModel):
+class TaskStatusUpdateRequest(BaseModel):
     """данные для изменения статуса задачи"""
 
     model_config = ConfigDict(extra="forbid")
 
     status: TaskStatus
-    changed_by_user_id: UUID
 
 
 class TaskListItemRead(BaseModel):
